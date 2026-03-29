@@ -1,0 +1,643 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "linkedin-post",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "87b84880-c3d6-45ec-b7f0-0e4b2b466a5f",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        2912,
+        -176
+      ],
+      "webhookId": "linkedin-post"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "conditions": [
+            {
+              "id": "cond_source",
+              "leftValue": "={{ $json.body.content_source }}",
+              "rightValue": "Google Sheets",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5dcd67fc-8296-4f20-8c09-d580b3ea3137",
+      "name": "Single Topic or Google Sheets?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3152,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Single topic path\nconst body = $json.body;\nreturn [{\n  json: {\n    topic: body.post_topic,\n    rowIndex: null, // No sheet row to update for single topic\n    sheet_id: null,\n    post_tone: body.post_tone || 'Professional',\n    include_hashtags: body.include_hashtags === true || body.include_hashtags === 'true',\n    image_option: body.image_option || 'AI-Generated Image',\n    callbackUrl: body.callbackUrl || '',\n    linkedin_access_token: body.tokens?.linkedin || body.access_token || '',\n    google_sheets_access_token: body.tokens?.google_sheets || ''\n  }\n}];"
+      },
+      "id": "5154ceca-7173-4ca9-857a-4ed4d4658eb6",
+      "name": "Single Topic Setup",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3488,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ (() => { const url = $('Webhook').first().json.body.sheet_url; const match = url.match(/\\/spreadsheets\\/d\\/([a-zA-Z0-9-_]+)/); return match ? `https://sheets.googleapis.com/v4/spreadsheets/${match[1]}/values/Sheet1` : url; })() }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Webhook').first().json.body.tokens?.google_sheets || $('Webhook').first().json.body.access_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9ff344c9-832c-45ee-8a19-831f32779a48",
+      "name": "Read Topics Sheet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3392,
+        -352
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Filter out already-Posted topics and take the first N\n// from the TOP of the sheet (preserving order).\n//\n// Expected sheet columns:\n//   A: Topic\n//   B: Status   (empty = not posted, 'Posted' = done)\n//   C: Post URL (filled in after posting)\n//   D: Posted Date\n// ============================================================\nconst body = $('Webhook').first().json.body;\nconst limit = 1;\n\n// Extract sheet ID from URL for later write-back\nconst sheetUrl = body.sheet_url || '';\nconst sheetIdMatch = sheetUrl.match(/\\/spreadsheets\\/d\\/([a-zA-Z0-9-_]+)/);\nconst sheet_id = sheetIdMatch ? sheetIdMatch[1] : null;\n\n// Sheets API returns { values: [[header1,...], [row1col1,...], ...] }\nconst rows = $json.values || [];\nif (rows.length < 2) {\n  throw new Error('Sheet is empty or has no data rows. Add topics first.');\n}\n\n// Find column indices from header row (case-insensitive)\nconst headers = rows[0].map(h => (h || '').toLowerCase().trim());\nconst topicIdx  = headers.findIndex(h => h === 'topic'  || h === 'topics');\nconst statusIdx = headers.findIndex(h => h === 'status');\n\n// Default to column 0 for topic if header not found\nconst tIdx = topicIdx >= 0 ? topicIdx : 0;\nconst sIdx = statusIdx >= 0 ? statusIdx : 1;\n\n// Filter unposted rows (from top), track their 1-based sheet row numbers\n// Row index in sheet = array index + 2 (1 for header row + 1 for 1-based)\nconst unpostedRows = [];\nfor (let i = 1; i < rows.length; i++) {\n  const row = rows[i];\n  const topic  = (row[tIdx]  || '').trim();\n  const status = (row[sIdx]  || '').trim().toLowerCase();\n  if (topic && status !== 'posted') {\n    unpostedRows.push({ row, sheetRowNumber: i + 1 }); // +1 because arrays are 0-based but sheets are 1-based, plus 1 for header\n  }\n  if (unpostedRows.length >= limit) break;\n}\n\nif (unpostedRows.length === 0) {\n  throw new Error('All topics in the sheet have already been posted! Add new topics to continue.');\n}\n\n// Return one item per topic to be posted\nreturn unpostedRows.map(({ row, sheetRowNumber }) => ({\n  json: {\n    topic: row[tIdx],\n    rowIndex: sheetRowNumber,   // Sheet row number for write-back\n    sheet_id: sheet_id,         // Spreadsheet ID for API calls\n    post_tone: body.post_tone || 'Professional',\n    include_hashtags: body.include_hashtags === true || body.include_hashtags === 'true',\n    image_option: body.image_option || 'AI-Generated Image',\n    callbackUrl: body.callbackUrl || '',\n    linkedin_access_token: body.tokens?.linkedin || body.access_token || '',\n    google_sheets_access_token: body.tokens?.google_sheets || body.access_token || ''\n  }\n}));"
+      },
+      "id": "d3d1b598-5498-48c7-9276-2c81e1570dbd",
+      "name": "Filter Unposted Topics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3600,
+        -352
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={{ $('Webhook').first().json.body.gemini_api_key }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "body": "={{ JSON.stringify({ contents: [{ parts: [{ text: `Write a LinkedIn post about the following topic.\\n\\nTopic: ${$json.topic}\\nTone: ${$json.post_tone}\\n${$json.include_hashtags ? 'Include 3-5 relevant hashtags at the end of the post.' : 'Do NOT include any hashtags.'}\\n\\nInstructions:\\n- Write in first person as a thought leader\\n- Keep it under 250 words\\n- Make it engaging and conversation-starting\\n- Do NOT use generic filler phrases like 'In today's fast-paced world'\\n- Plain text only. No markdown, no asterisks.${$json.include_hashtags ? '\\n- End the post with relevant hashtags on the last line' : ''}` }] }] }) }}",
+        "options": {}
+      },
+      "id": "f340fd4e-acf1-43c3-a82c-d67020e1c256",
+      "name": "Gemini - Generate LinkedIn Post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3872,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract post text from Gemini + carry forward all context fields\nconst postText = $json.candidates?.[0]?.content?.parts?.[0]?.text || 'Post generation failed.';\n\n// Grab context correctly depending on which path triggered us\nconst isSingle = $('Single Topic Setup').all().length > 0;\nconst ctx = isSingle \n  ? $('Single Topic Setup').item?.json || $('Single Topic Setup').all()[0]?.json\n  : $('Filter Unposted Topics').item?.json || $('Filter Unposted Topics').all()[0]?.json;\n\nreturn {\n  json: {\n    ...(ctx || {}),\n    post_text: postText.trim()\n  }\n};"
+      },
+      "id": "e0f80e68-3a81-4983-b3dd-4bfc9ebbf3fc",
+      "name": "Extract Post Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4112,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "conditions": [
+            {
+              "id": "cond_img",
+              "leftValue": "={{ $json.image_option }}",
+              "rightValue": "AI-Generated Image",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ca480809-f7f3-42f6-8d1b-38eb672cd906",
+      "name": "AI Image or Custom Image?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        4352,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pollinations directly returns the image as binary data.\nconst ctx = $('Extract Post Text').item.json;\nif (!$binary || !Object.keys($binary).length) {\n  return { json: { ...ctx, hasImage: false } };\n}\n\n// We typically find it mapped to the 'data' key by n8n HTTP Request\nconst imageBinary = $binary.data;\n\nreturn {\n  json: { ...ctx, hasImage: true },\n  binary: {\n    image: {\n      data: imageBinary.data,\n      mimeType: imageBinary.mimeType,\n      fileName: 'linkedin_post_image.png'\n    }\n  }\n};"
+      },
+      "id": "18f06d98-63ba-4e4e-b47c-1d57f66734b9",
+      "name": "Prepare AI Image",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4832,
+        -336
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// No AI image — text only, carry context forward\nreturn { json: { ...$json, hasImage: false } };"
+      },
+      "id": "62d12aec-1e19-4fe2-9db1-84ee71e23fb7",
+      "name": "No Image (Text Only)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4704,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge both branches back into one consistent payload\nconst ctx = $('Extract Post Text').item.json;\nconst accessToken = $json.linkedin_access_token || ctx.linkedin_access_token;\nconst postText = $json.post_text || ctx.post_text;\nreturn {\n  json: {\n    ...ctx,\n    linkedin_access_token: accessToken,\n    post_text: postText\n  }\n};"
+      },
+      "id": "5167d330-f582-483f-a7a3-d05b8355f071",
+      "name": "Prepare LinkedIn Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5120,
+        -192
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.linkedin.com/v2/userinfo",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.linkedin_access_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "57376302-1b79-4465-a2df-8c746a46f189",
+      "name": "Get LinkedIn Person URN",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5296,
+        -192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the UGC post body and keep all context for later write-back\nconst personSub = $json.sub;\nconst authorUrn = personSub.startsWith('urn:li:person:') ? personSub : `urn:li:person:${personSub}`;\nconst prev = $('Prepare LinkedIn Payload').item.json;\n\nreturn {\n  json: {\n    // LinkedIn UGC post payload\n    author: authorUrn,\n    lifecycleState: 'PUBLISHED',\n    specificContent: {\n      'com.linkedin.ugc.ShareContent': {\n        shareCommentary: { text: prev.post_text },\n        shareMediaCategory: 'NONE'\n      }\n    },\n    visibility: { 'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC' },\n    // Carry-forward context\n    _accessToken: prev.linkedin_access_token,\n    _sheetsToken: prev.google_sheets_access_token,\n    _callbackUrl: prev.callbackUrl,\n    _topic: prev.topic,\n    _rowIndex: prev.rowIndex,\n    _sheet_id: prev.sheet_id\n  }\n};"
+      },
+      "id": "024c865f-d179-4ec9-bb71-23e3e6b7ccc3",
+      "name": "Build UGC Post Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5472,
+        -192
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.linkedin.com/v2/ugcPosts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json._accessToken }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Restli-Protocol-Version",
+              "value": "2.0.0"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { author: $json.author, lifecycleState: $json.lifecycleState, specificContent: $json.specificContent, visibility: $json.visibility } }}",
+        "options": {}
+      },
+      "id": "573abd1c-2d8a-4911-8f3f-b7eb3e1ed406",
+      "name": "Post to LinkedIn",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5664,
+        -192
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the sheet update payload:\n//   Column B (Status) = 'Posted'\n//   Column C (Post URL) = LinkedIn post URL\n//   Column D (Posted Date) = Today's date\n//\n// LinkedIn API returns: { id: 'urn:li:ugcPost:XXXXXXXXX' }\nconst prev = $('Build UGC Post Body').item.json;\nconst postUrn = $json.id || '';\n\n// Convert URN to viewable URL: urn:li:ugcPost:1234 → https://www.linkedin.com/feed/update/urn:li:ugcPost:1234/\nconst postUrl = postUrn ? `https://www.linkedin.com/feed/update/${postUrn}/` : 'N/A';\n\nconst today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD\n\nreturn {\n  json: {\n    sheetsToken: prev._sheetsToken,\n    sheet_id: prev._sheet_id,\n    rowIndex: prev._rowIndex,\n    postUrl: postUrl,\n    postUrn: postUrn,\n    today: today,\n    topic: prev._topic,\n    callbackUrl: prev._callbackUrl\n  }\n};"
+      },
+      "id": "fb99108a-c060-4be8-b30b-488f87b53ff8",
+      "name": "Prepare Sheet Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5840,
+        -192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "conditions": [
+            {
+              "id": "cond_has_sheet",
+              "leftValue": "={{ $json.sheet_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ad0098a3-e573-4090-a6c6-316c18369154",
+      "name": "From Sheet or Single Topic?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        6016,
+        -192
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.sheet_id }}/values/Sheet1!B{{ $json.rowIndex }}:D{{ $json.rowIndex }}?valueInputOption=USER_ENTERED",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.sheetsToken }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "body": "={{ JSON.stringify({ range: `Sheet1!B${$json.rowIndex}:D${$json.rowIndex}`, majorDimension: 'ROWS', values: [['Posted', $json.postUrl, $json.today]] }) }}",
+        "options": {}
+      },
+      "id": "ce960676-8058-4bfd-bbbf-d19be265c7a3",
+      "name": "Update Sheet - Mark Posted",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6208,
+        -352
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://backend.affanmohd.online/webhooks/n8n/callback",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-api-key",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwZWY4MjZlOS0wNjg2LTQyZTYtYWI5Ny1jMmZhYjMzZDY4ZGMiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY5NDk4MTMxfQ.3frCQXyY4qJDWGxoFdERmeC94Cj74b3IURRLqm9NF0U"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  uid: $('Webhook').first().json.body.uid,\n  automationId: $('Webhook').first().json.body.automationId,\n  executionId: $('Webhook').first().json.body.executionId,\n  status: \"successful\",\n  message: \"LinkedIn post completed successfully! Topic: \" + ($json.topic || \"Single Topic\") + \".\",\n  automationName: \"LinkedIn Post Automation\",\n  postUrl: $json.postUrl || \"N/A\",\n  resultLink: $json.postUrl || \"N/A\"\n} }}",
+        "options": {}
+      },
+      "executeOnce": true,
+      "id": "84542c35-c3ec-4d3e-b3d3-e36de41eb643",
+      "name": "Callback to WebPilot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6400,
+        -176
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "hf_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "inputs",
+              "value": "=={{ 'Professional, corporate, modern background for LinkedIn post about: ' + $json.topic + '. Clean, no text.' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "85369259-bb70-46a7-92d2-7a21efac38fe",
+      "name": "Huggingface.ai - Generate Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4592,
+        -336
+      ],
+      "retryOnFail": false,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Single Topic or Google Sheets?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Single Topic or Google Sheets?": {
+      "main": [
+        [
+          {
+            "node": "Read Topics Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Single Topic Setup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Single Topic Setup": {
+      "main": [
+        [
+          {
+            "node": "Gemini - Generate LinkedIn Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Topics Sheet": {
+      "main": [
+        [
+          {
+            "node": "Filter Unposted Topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Unposted Topics": {
+      "main": [
+        [
+          {
+            "node": "Gemini - Generate LinkedIn Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini - Generate LinkedIn Post": {
+      "main": [
+        [
+          {
+            "node": "Extract Post Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Post Text": {
+      "main": [
+        [
+          {
+            "node": "AI Image or Custom Image?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Image or Custom Image?": {
+      "main": [
+        [
+          {
+            "node": "Huggingface.ai - Generate Image",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Image (Text Only)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare AI Image": {
+      "main": [
+        [
+          {
+            "node": "Prepare LinkedIn Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Image (Text Only)": {
+      "main": [
+        [
+          {
+            "node": "Prepare LinkedIn Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare LinkedIn Payload": {
+      "main": [
+        [
+          {
+            "node": "Get LinkedIn Person URN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get LinkedIn Person URN": {
+      "main": [
+        [
+          {
+            "node": "Build UGC Post Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build UGC Post Body": {
+      "main": [
+        [
+          {
+            "node": "Post to LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Prepare Sheet Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Sheet Update": {
+      "main": [
+        [
+          {
+            "node": "From Sheet or Single Topic?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "From Sheet or Single Topic?": {
+      "main": [
+        [
+          {
+            "node": "Update Sheet - Mark Posted",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Callback to WebPilot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Sheet - Mark Posted": {
+      "main": [
+        [
+          {
+            "node": "Callback to WebPilot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Huggingface.ai - Generate Image": {
+      "main": [
+        [
+          {
+            "node": "Prepare AI Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "92e68dbd508648748efd524fb8eb152e025360bb22e30e51b7ed700741996a08"
+  }
+}

@@ -1,0 +1,274 @@
+{
+  "name": "Google Docs AI Notes Automation (WebPilot)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "google-docs-automation",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "webhookId": "google-docs-automation"
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.body.action }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "Create AI Document"
+            },
+            {
+              "value2": "Create Empty Document"
+            },
+            {
+              "value2": "Rename Document"
+            },
+            {
+              "value2": "Delete Document"
+            }
+          ]
+        }
+      },
+      "id": "switch",
+      "name": "Action Switch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [200, 300]
+    },
+    
+    
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={{ $('Webhook').first().json.body.gemini_api_key }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"Write detailed, structured notes on the following topic: \" + $json.body.topic + \". Use simple formatting suitable for a basic document.\"\n        }\n      ]\n    }\n  ]\n} }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gemini-generate",
+      "name": "Gemini Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [450, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://docs.googleapis.com/v1/documents",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $('Webhook').first().json.body.google_docsToken || $('Webhook').first().json.body.access_token }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"title\": $('Webhook').first().json.body.target_name } }}",
+        "options": {}
+      },
+      "id": "create-ai-doc",
+      "name": "Create Doc (AI)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [650, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://docs.googleapis.com/v1/documents/{{ $json.documentId }}:batchUpdate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $('Webhook').first().json.body.google_docsToken || $('Webhook').first().json.body.access_token }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"requests\": [ { \"insertText\": { \"location\": { \"index\": 1 }, \"text\": $('Gemini Request').first().json.candidates[0].content.parts[0].text } } ] } }}",
+        "options": {}
+      },
+      "id": "insert-ai-text",
+      "name": "Insert Notes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [850, 0]
+    },
+
+    
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://docs.googleapis.com/v1/documents",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $('Webhook').first().json.body.google_docsToken || $('Webhook').first().json.body.access_token }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"title\": $('Webhook').first().json.body.target_name } }}",
+        "options": {}
+      },
+      "id": "create-empty-doc",
+      "name": "Create Empty Doc",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [450, 200]
+    },
+
+    
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://www.googleapis.com/drive/v3/files?q={{ encodeURIComponent(\"name='\" + $('Webhook').first().json.body.target_name + \"' and trashed=false\") }}&fields=files(id,name)",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $('Webhook').first().json.body.google_docsToken || $('Webhook').first().json.body.access_token }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "search-doc-rename",
+      "name": "Search Doc (Rename)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [450, 400]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $json.files[0].id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $('Webhook').first().json.body.google_docsToken || $('Webhook').first().json.body.access_token }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"name\": $('Webhook').first().json.body.new_name } }}",
+        "options": {}
+      },
+      "id": "rename-doc",
+      "name": "Rename Doc",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [650, 400]
+    },
+
+    
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://www.googleapis.com/drive/v3/files?q={{ encodeURIComponent(\"name='\" + $('Webhook').first().json.body.target_name + \"' and trashed=false\") }}&fields=files(id,name)",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $('Webhook').first().json.body.google_docsToken || $('Webhook').first().json.body.access_token }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "search-doc-delete",
+      "name": "Search Doc (Delete)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [450, 600]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $json.files[0].id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $('Webhook').first().json.body.google_docsToken || $('Webhook').first().json.body.access_token }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "delete-doc",
+      "name": "Delete Doc",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [650, 600]
+    },
+
+    
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://backend.affanmohd.online/webhooks/n8n/callback",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  uid: $('Webhook').first().json.body.uid,\n  automationId: $('Webhook').first().json.body.automationId,\n  executionId: $('Webhook').first().json.body.executionId,\n  status: \"successful\",\n  message: \"Google Docs Action '\" + $('Webhook').first().json.body.action + \"' completed successfully.\",\n  automationName: \"Google Docs AI Notes\"\n} }}",
+        "options": {}
+      },
+      "id": "callback",
+      "name": "Callback to WebPilot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          { "node": "Action Switch", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Action Switch": {
+      "main": [
+        [ { "node": "Gemini Request", "type": "main", "index": 0 } ],
+        [ { "node": "Create Empty Doc", "type": "main", "index": 0 } ],
+        [ { "node": "Search Doc (Rename)", "type": "main", "index": 0 } ],
+        [ { "node": "Search Doc (Delete)", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Gemini Request": { "main": [ [ { "node": "Create Doc (AI)", "type": "main", "index": 0 } ] ] },
+    "Create Doc (AI)": { "main": [ [ { "node": "Insert Notes", "type": "main", "index": 0 } ] ] },
+    "Insert Notes": { "main": [ [ { "node": "Callback to WebPilot", "type": "main", "index": 0 } ] ] },
+
+    "Create Empty Doc": { "main": [ [ { "node": "Callback to WebPilot", "type": "main", "index": 0 } ] ] },
+
+    "Search Doc (Rename)": { "main": [ [ { "node": "Rename Doc", "type": "main", "index": 0 } ] ] },
+    "Rename Doc": { "main": [ [ { "node": "Callback to WebPilot", "type": "main", "index": 0 } ] ] },
+
+    "Search Doc (Delete)": { "main": [ [ { "node": "Delete Doc", "type": "main", "index": 0 } ] ] },
+    "Delete Doc": { "main": [ [ { "node": "Callback to WebPilot", "type": "main", "index": 0 } ] ] }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "google-docs-automation-v1",
+  "id": "google-docs-automation",
+  "tags": [ "webpilot", "google", "docs", "ai" ]
+}

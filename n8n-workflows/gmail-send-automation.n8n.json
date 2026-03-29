@@ -1,0 +1,403 @@
+{
+  "name": "Gmail Send Automation (WebPilot)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "gmail-send",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "gmail-send"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ (() => { const url = $json.body.recipient_source; const match = url.match(/\\/spreadsheets\\/d\\/([a-zA-Z0-9-_]+)/); return match ? `https://sheets.googleapis.com/v4/spreadsheets/${match[1]}/values/Sheet1` : url; })() }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.body.tokens?.google_sheets || $json.body.tokens?.gmail || $json.body.access_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2",
+      "name": "Read Recipients Sheet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Sheets API response and attach webhook inputs to each recipient row\nconst webhookData = $('Webhook').first().json.body;\n\nconst rows = $json.values || [];\nif (rows.length < 2) return [];\n\nconst headers = rows[0].map(h => h.trim());\nconst nameIdx = headers.findIndex(h => h.toLowerCase() === 'name');\nconst emailIdx = headers.findIndex(h => h.toLowerCase() === 'email');\n\nconst dataRows = rows.slice(1);\n\nreturn dataRows.map(row => ({\n  json: {\n    Name: row[nameIdx >= 0 ? nameIdx : 0] || '',\n    Email: row[emailIdx >= 0 ? emailIdx : 1] || '',\n    email_subject: webhookData.email_subject,\n    body_type: webhookData.body_type,\n    email_body: webhookData.email_body || '',\n    email_subject_for_ai: webhookData.email_subject_for_ai || '',\n    send_limit: parseInt(webhookData.send_limit) || 50,\n    gmail_access_token: webhookData.tokens?.gmail || webhookData.access_token || ''\n  }\n}));"
+      },
+      "id": "3",
+      "name": "Attach Webhook Inputs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond_ai",
+              "leftValue": "={{ $json.body_type }}",
+              "rightValue": "AI-Generated (Gemini)",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4",
+      "name": "AI or Manual Body?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={{ $('Webhook').first().json.body.gemini_api_key }}",
+        "sendBody": true,
+        "body": "={{ JSON.stringify({ contents: [{ parts: [{ text: `Write a personalized, professional email body for ${$json.Name} (email: ${$json.Email}).\\n\\nAbout this email: ${$json.email_subject_for_ai}\\nEmail subject: ${$json.email_subject}\\n\\nImportant Resource/Link to share (You MUST seamlessly integrate this exact link into the email context): ${$('Webhook').first().json.body.previous_step_result || 'None provided'}\\n\\nInstructions:\\n- Address the recipient by their first name\\n- Keep it concise (3-4 short paragraphs max)\\n- Do NOT include a subject line, greeting label, or closing signature - just the body text\\n- Make it feel personal and human, not like a mass email\\n- Plain text only, no markdown` }] }] }) }}",
+        "options": {},
+        "contentType": "raw",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        }
+      },
+      "id": "5",
+      "name": "Gemini - Generate Email Body",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract AI body from Gemini response\nconst aiText = $json.candidates?.[0]?.content?.parts?.[0]?.text || 'Hi there,';\nconst ctx = $('Attach Webhook Inputs').item.json;\nreturn {\n  json: {\n    ...ctx,\n    final_body: aiText.trim()\n  }\n};"
+      },
+      "id": "6",
+      "name": "Extract AI Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Use manual body with {{Name}} placeholder replaced\nconst userBody = $json.email_body || '';\nconst previousLink = $('Webhook').first().json.body.previous_step_result || '';\nlet manual = userBody.replace(/\\{\\{Name\\}\\}/gi, $json.Name || '').replace(/\\{\\{Email\\}\\}/gi, $json.Email || '');\nif (manual.includes('[Your YouTube Video Link]') && previousLink) {\n    manual = manual.replace('\\[Your YouTube Video Link\\]', previousLink);\n} else if (manual.includes('{{PREVIOUS_RESULT}}') && previousLink) {\n    manual = manual.replace('\\{\\{PREVIOUS_RESULT\\}\\}', previousLink);\n} else if (previousLink) {\n    manual = manual + '\\n\\nResource Link: ' + previousLink;\n}\nreturn {\n  json: {\n    ...$json,\n    final_body: manual\n  }\n};"
+      },
+      "id": "7",
+      "name": "Use Manual Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build a raw RFC 2822 email message and base64url encode it for the Gmail API\nconst to = $json.Email;\nconst subject = ($json.email_subject || '').replace(/\\{\\{Name\\}\\}/gi, $json.Name || '').replace(/\\{\\{Email\\}\\}/gi, $json.Email || '');\nconst body = $json.final_body || '';\nconst accessToken = $json.gmail_access_token;\n\n// Build raw message\nconst rawMessage = [\n  `To: ${to}`,\n  `Subject: ${subject}`,\n  `Content-Type: text/plain; charset=UTF-8`,\n  ``,\n  body\n].join('\\r\\n');\n\n// Base64url encode (Gmail requires base64url, not standard base64)\nconst encoded = Buffer.from(rawMessage).toString('base64')\n  .replace(/\\+/g, '-')\n  .replace(/\\//g, '_')\n  .replace(/=+$/, '');\n\nreturn {\n  json: {\n    raw: encoded,\n    gmail_access_token: accessToken,\n    _to: to,\n    _callbackUrl: $('Webhook').first().json.body.callbackUrl || ''\n  }\n};"
+      },
+      "id": "7b",
+      "name": "Build Raw Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.gmail_access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "raw",
+              "value": "={{ $json.raw }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8",
+      "name": "Send Gmail",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://backend.affanmohd.online/webhooks/n8n/callback",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-api-key",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwZWY4MjZlOS0wNjg2LTQyZTYtYWI5Ny1jMmZhYjMzZDY4ZGMiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY5NDk4MTMxfQ.3frCQXyY4qJDWGxoFdERmeC94Cj74b3IURRLqm9NF0U"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  uid: $('Webhook').first().json.body.uid,\n  automationId: $('Webhook').first().json.body.automationId,\n  executionId: $('Webhook').first().json.body.executionId,\n  status: \"successful\",\n  message: \"Emails sent successfully.\",\n  automationName: \"Gmail Send Automation\"\n} }}",
+        "options": {}
+      },
+      "executeOnce": true,
+      "id": "9",
+      "name": "Callback to WebPilot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "options": {},
+        "batchSize": 1
+      },
+      "id": "loop-node",
+      "name": "Loop",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 8,
+        "unit": "seconds"
+      },
+      "id": "wait-node",
+      "name": "Wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1050,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Read Recipients Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Recipients Sheet": {
+      "main": [
+        [
+          {
+            "node": "Attach Webhook Inputs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Webhook Inputs": {
+      "main": [
+        [
+          {
+            "node": "Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI or Manual Body?": {
+      "main": [
+        [
+          {
+            "node": "Gemini - Generate Email Body",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Use Manual Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini - Generate Email Body": {
+      "main": [
+        [
+          {
+            "node": "Extract AI Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract AI Body": {
+      "main": [
+        [
+          {
+            "node": "Build Raw Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use Manual Body": {
+      "main": [
+        [
+          {
+            "node": "Build Raw Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Raw Email": {
+      "main": [
+        [
+          {
+            "node": "Send Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Gmail": {
+      "main": [
+        [
+          {
+            "node": "Loop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Callback to WebPilot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "AI or Manual Body?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {},
+  "versionId": "gmail-send-v2",
+  "id": "gmail-send-automation",
+  "tags": [
+    "webpilot",
+    "gmail",
+    "email"
+  ]
+}

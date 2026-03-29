@@ -1,0 +1,483 @@
+{
+  "name": "Google Drive Automation (WebPilot)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "google-drive",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        400
+      ],
+      "webhookId": "google-drive"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "conditions": [
+            {
+              "id": "cond_valid",
+              "leftValue": "={{ ['Create Folder', 'Create File', 'Rename Item', 'Delete Item'].includes($json.body.action || $json.body.drive_action) ? 'Yes' : 'No' }}",
+              "rightValue": "Yes",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "valid-action-check",
+      "name": "Is Valid Action?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        400,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.body.action || $json.body.drive_action }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "Create Folder",
+              "output": 0
+            },
+            {
+              "value2": "Create File",
+              "output": 1
+            },
+            {
+              "value2": "Rename Item",
+              "output": 2
+            },
+            {
+              "value2": "Delete Item",
+              "output": 3
+            }
+          ]
+        }
+      },
+      "id": "2",
+      "name": "Switch Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [
+        640,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/drive/v3/files",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Webhook').first().json.body.tokens?.google_drive || $('Webhook').first().json.body.access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  name: ($('Webhook').first().json.body.target_name || $('Webhook').first().json.body.item_name),\n  mimeType: 'application/vnd.google-apps.folder'\n} }}",
+        "options": {}
+      },
+      "id": "create-folder",
+      "name": "Create Folder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        920,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/drive/v3/files",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Webhook').first().json.body.tokens?.google_drive || $('Webhook').first().json.body.access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  name: ($('Webhook').first().json.body.target_name || $('Webhook').first().json.body.item_name),\n  mimeType: 'application/vnd.google-apps.document'\n} }}",
+        "options": {}
+      },
+      "id": "create-file",
+      "name": "Create Google Doc",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        920,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://www.googleapis.com/drive/v3/files?q={{ encodeURIComponent(`name='${$('Webhook').first().json.body.target_name || $('Webhook').first().json.body.item_name}' and mimeType ${$('Webhook').first().json.body.item_type === 'Folder' ? '=' : '!='} 'application/vnd.google-apps.folder' and trashed=false`) }}&fields=files(id,name)",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Webhook').first().json.body.tokens?.google_drive || $('Webhook').first().json.body.access_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "search-rename",
+      "name": "Search Target (Rename)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        920,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$json.files || $json.files.length === 0) {\n  throw new Error(`File or folder named '${$('Webhook').first().json.body.target_name || $('Webhook').first().json.body.item_name}' not found.`);\n}\nreturn { json: { fileId: $json.files[0].id } };"
+      },
+      "id": "check-rename",
+      "name": "Check Found (Rename)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $json.fileId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Webhook').first().json.body.tokens?.google_drive || $('Webhook').first().json.body.access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  name: $('Webhook').first().json.body.new_name\n} }}",
+        "options": {}
+      },
+      "id": "rename-item",
+      "name": "Rename Item",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://www.googleapis.com/drive/v3/files?q={{ encodeURIComponent(`name='${$('Webhook').first().json.body.target_name || $('Webhook').first().json.body.item_name}' and mimeType ${$('Webhook').first().json.body.item_type === 'Folder' ? '=' : '!='} 'application/vnd.google-apps.folder' and trashed=false`) }}&fields=files(id,name)",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Webhook').first().json.body.tokens?.google_drive || $('Webhook').first().json.body.access_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "search-delete",
+      "name": "Search Target (Delete)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        920,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$json.files || $json.files.length === 0) {\n  throw new Error(`File or folder named '${$('Webhook').first().json.body.target_name || $('Webhook').first().json.body.item_name}' not found.`);\n}\nreturn { json: { fileId: $json.files[0].id } };"
+      },
+      "id": "check-delete",
+      "name": "Check Found (Delete)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $json.fileId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Webhook').first().json.body.tokens?.google_drive || $('Webhook').first().json.body.access_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "delete-item",
+      "name": "Delete Item",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "throw new Error(`Invalid action: ${$json.body.action || $json.body.drive_action || 'Unknown'}`);"
+      },
+      "id": "invalid-action",
+      "name": "Invalid Action Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://backend.affanmohd.online/webhooks/n8n/callback",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-api-key",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwZWY4MjZlOS0wNjg2LTQyZTYtYWI5Ny1jMmZhYjMzZDY4ZGMiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY5NDk4MTMxfQ.3frCQXyY4qJDWGxoFdERmeC94Cj74b3IURRLqm9NF0U"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  uid: $('Webhook').first().json.body.uid,\n  automationId: $('Webhook').first().json.body.automationId,\n  executionId: $('Webhook').first().json.body.executionId,\n  status: \"successful\",\n  message: \"Google Drive action '\" + ($('Webhook').first().json.body.action || $('Webhook').first().json.body.drive_action) + \"' completed successfully for target '\" + ($('Webhook').first().json.body.target_name || $('Webhook').first().json.body.item_name) + \"'.\",\n  automationName: \"Google Drive Automation\",\n  resultLink: (['Create Folder', 'Create File', 'Rename Item'].includes($('Webhook').first().json.body.action || $('Webhook').first().json.body.drive_action) && $json.id) ? `https://drive.google.com/open?id=${$json.id}` : undefined\n} }}",
+        "options": {}
+      },
+      "executeOnce": true,
+      "id": "callback",
+      "name": "Callback to WebPilot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1680,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Is Valid Action?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Valid Action?": {
+      "main": [
+        [
+          {
+            "node": "Switch Action",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Invalid Action Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Action": {
+      "main": [
+        [
+          {
+            "node": "Create Folder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Google Doc",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Search Target (Rename)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Search Target (Delete)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Target (Rename)": {
+      "main": [
+        [
+          {
+            "node": "Check Found (Rename)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Found (Rename)": {
+      "main": [
+        [
+          {
+            "node": "Rename Item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Target (Delete)": {
+      "main": [
+        [
+          {
+            "node": "Check Found (Delete)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Found (Delete)": {
+      "main": [
+        [
+          {
+            "node": "Delete Item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Folder": {
+      "main": [
+        [
+          {
+            "node": "Callback to WebPilot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Google Doc": {
+      "main": [
+        [
+          {
+            "node": "Callback to WebPilot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rename Item": {
+      "main": [
+        [
+          {
+            "node": "Callback to WebPilot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Item": {
+      "main": [
+        [
+          {
+            "node": "Callback to WebPilot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {},
+  "versionId": "google-drive-v2",
+  "id": "google-drive-automation",
+  "tags": [
+    "webpilot",
+    "google-drive"
+  ]
+}

@@ -1,0 +1,187 @@
+{
+  "name": "Notion AI Notes Automation (WebPilot)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "notion-ai-notes",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        400
+      ],
+      "webhookId": "notion-ai-notes"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={{ $('Webhook').first().json.body.gemini_api_key }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"Write detailed, structured notes on the following topic: \" + $json.body.topic + \". Output ONLY plain text formatting with simple dashes (-) for lists and ALL CAPS for headings. Do NOT use markdown symbols like asterisks, hashtags, or backticks, as this text will be injected directly into a generic text block in Notion.\"\n        }\n      ]\n    }\n  ]\n} }}",
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        }
+      },
+      "id": "generate-notes",
+      "name": "Gemini - Generate Notes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $json.candidates?.[0]?.content?.parts?.[0]?.text || 'Note generation failed.';\n// Split text into chunks if it exceeds Notion's 2000 character limit per block\nconst paragraphs = text.split('\\n\\n').filter(p => p.trim() !== '');\n\nconst children = paragraphs.map(p => ({\n  object: 'block',\n  type: 'paragraph',\n  paragraph: {\n    rich_text: [{\n      type: 'text',\n      text: { content: p.substring(0, 2000) }\n    }]\n  }\n}));\n\nreturn {\n  json: {\n    payload: {\n      parent: { page_id: $('Webhook').first().json.body.target_page_id },\n      properties: {\n        title: {\n          title: [\n            {\n              text: { content: $('Webhook').first().json.body.topic }\n            }\n          ]\n        }\n      },\n      children: children\n    },\n    notionToken: $('Webhook').first().json.body.tokens?.notion || $('Webhook').first().json.body.access_token,\n    topic: $('Webhook').first().json.body.topic\n  }\n};"
+      },
+      "id": "parse-blocks",
+      "name": "Prepare Notion Blocks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.notion.com/v1/pages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.notionToken }}"
+            },
+            {
+              "name": "Notion-Version",
+              "value": "2022-06-28"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.payload }}",
+        "options": {}
+      },
+      "id": "create-notion-page",
+      "name": "Create Notion Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://backend.affanmohd.online/webhooks/n8n/callback",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-api-key",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwZWY4MjZlOS0wNjg2LTQyZTYtYWI5Ny1jMmZhYjMzZDY4ZGMiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY5NDk4MTMxfQ.3frCQXyY4qJDWGxoFdERmeC94Cj74b3IURRLqm9NF0U"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  uid: $('Webhook').first().json.body.uid,\n  automationId: $('Webhook').first().json.body.automationId,\n  executionId: $('Webhook').first().json.body.executionId,\n  status: \"successful\",\n  message: \"Notion Notes created successfully.\",\n  automationName: \"Notion AI Notes\",\n  resultLink: $('Create Notion Page').item.json.url\n} }}",
+        "options": {}
+      },
+      "executeOnce": true,
+      "id": "callback",
+      "name": "Callback to WebPilot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Gemini - Generate Notes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini - Generate Notes": {
+      "main": [
+        [
+          {
+            "node": "Prepare Notion Blocks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Notion Blocks": {
+      "main": [
+        [
+          {
+            "node": "Create Notion Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Notion Page": {
+      "main": [
+        [
+          {
+            "node": "Callback to WebPilot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {},
+  "versionId": "notion-ai-notes-v1",
+  "id": "notion-ai-notes-automation",
+  "tags": [
+    "webpilot",
+    "notion",
+    "ai",
+    "gemini"
+  ]
+}
