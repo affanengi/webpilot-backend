@@ -63,14 +63,60 @@ router.post('/chat', authMiddleware, async (req, res) => {
             return res.status(400).json({ success: false, error: "Prompt is required" });
         }
 
-        // 1. Coordinator Intent Classification
-        const classification = await aiService.determineIntent(prompt);
+        // 1. Fetch existing automations for context (limit to 50 for token sanity)
+        const automationsSnapshot = await db.collection("users").doc(uid).collection("automations").limit(50).get();
+        const existingAutomations = automationsSnapshot.docs.map(doc => {
+            const data = doc.data();
+            const location = (data.isCustom === true || (data.steps && data.steps.length > 1)) ? "Custom Automations Tab" : "My Automations Tab";
+            return { id: doc.id, name: data.name || data.title || "Untitled Automation", location };
+        });
+
+        // 2. Coordinator Intent Classification
+        const classification = await aiService.determineIntent(prompt, { automations: existingAutomations });
         console.log(`[AI Chat] User ${uid} intent:`, classification.intent);
 
         if (classification.intent === 'SMALL_TALK') {
             return res.json({
                 success: true,
                 message: classification.response || "I'm here to help you automate! Try asking me to post to LinkedIn or upload to YouTube."
+            });
+        }
+
+        if (classification.intent === 'DELETE_AUTOMATION') {
+            const { automationId, automationName } = classification;
+            if (!automationId) {
+                return res.json({
+                    success: true,
+                    message: "I couldn't find an automation matching that name. Please verify the name from your Automations list."
+                });
+            }
+            // Return action for frontend to confirm deletion
+            return res.json({
+                success: true,
+                intent: 'DELETE_AUTOMATION',
+                automationId: automationId,
+                automationName: automationName || "Automation",
+                message: `Are you sure you want to delete **${automationName || "Automation"}**?`
+            });
+        }
+
+        if (classification.intent === 'CONNECT_ACCOUNT' || classification.intent === 'DISCONNECT_ACCOUNT') {
+            const { provider } = classification;
+            if (!provider) {
+                return res.json({
+                    success: true,
+                    message: "Which account are you trying to manage? Please specify (e.g. Google, YouTube, LinkedIn)."
+                });
+            }
+
+            // Return action for frontend to handle via OAuth/API
+            return res.json({
+                success: true,
+                intent: classification.intent,
+                provider: provider,
+                message: classification.intent === 'CONNECT_ACCOUNT' 
+                    ? `Click the button below to connect your **${provider}** account.` 
+                    : `Click the button below to disconnect your **${provider}** account.`
             });
         }
 
