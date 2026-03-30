@@ -74,10 +74,61 @@ router.post('/chat', authMiddleware, async (req, res) => {
             });
         }
 
+        if (classification.intent === 'BUILD_AUTOMATION') {
+            const blueprint = classification.automationBlueprint;
+
+            if (!blueprint || !blueprint.steps || blueprint.steps.length === 0) {
+                // Fallback if the AI didn't extract a blueprint
+                return res.json({
+                    success: true,
+                    message: "I'd love to build that for you! Could you be more specific? For example: **Build an automation with a Schedule Trigger and a LinkedIn Post node, name it Daily LinkedIn Post**."
+                });
+            }
+
+            // Derive aggregated accounts from steps
+            const connectedAccounts = [...new Set(
+                blueprint.steps
+                    .filter(s => s.connected_account_type)
+                    .map(s => s.connected_account_type)
+            )];
+            const primaryWebhook = blueprint.steps.find(s => s.n8nWebhookId)?.n8nWebhookId || null;
+            const primaryAccount = connectedAccounts[0] || null;
+
+            const automationName = blueprint.name || "AI-Created Automation";
+
+            const newAutomation = {
+                uid,
+                name: automationName,
+                steps: blueprint.steps,
+                edges: blueprint.edges || [],
+                inputs: {},
+                n8nWebhookId: primaryWebhook,
+                connected_account_type: primaryAccount,
+                connected_accounts: connectedAccounts,
+                status: "active",
+                icon: "smart_toy",
+                source: "ai-chat",
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            };
+
+            const docRef = await db.collection("users").doc(uid).collection("automations").add(newAutomation);
+            console.log(`[AI Chat] BUILD_AUTOMATION created: ${docRef.id} ("${automationName}") for user ${uid}`);
+
+            return res.json({
+                success: true,
+                intent: "BUILD_AUTOMATION",
+                automationId: docRef.id,
+                automationName,
+                nodeCount: blueprint.steps.length,
+                message: `I've built your **${automationName}** automation with ${blueprint.steps.length} node${blueprint.steps.length !== 1 ? "s" : ""}! Open it in the canvas to configure any settings and execute it when ready. 🚀`
+            });
+        }
+
         if (classification.intent === 'BUILD_NEW') {
             return res.json({
                 success: true,
-                message: classification.summary || "I can build a custom automation blueprint for that. This feature is coming soon — stay tuned! 🛠️"
+                message: classification.summary || "Could you be more specific about what you'd like to automate? For example: **Build a Schedule Trigger + LinkedIn Post automation, name it Daily Post**."
             });
         }
 
