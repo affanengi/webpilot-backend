@@ -85,13 +85,28 @@ router.post('/chat', authMiddleware, async (req, res) => {
                 });
             }
 
-            // Derive aggregated accounts from steps
+            // Trigger / logic node types — they never require external accounts
+            const TRIGGER_LOGIC_TYPES = new Set([
+                "scheduleNode", "manualTriggerNode", "waitNode",
+                "ifNode", "loopNode", "switchNode"
+            ]);
+
+            // Sanitize steps: strip account/webhook fields from trigger & logic nodes
+            const sanitizedSteps = blueprint.steps.map(step => {
+                if (TRIGGER_LOGIC_TYPES.has(step.type)) {
+                    // Only keep id, type, title, inputs — no account or webhook
+                    return { id: step.id, type: step.type, title: step.title, inputs: step.inputs || {} };
+                }
+                return step;
+            });
+
+            // Derive aggregated accounts only from action nodes
             const connectedAccounts = [...new Set(
-                blueprint.steps
+                sanitizedSteps
                     .filter(s => s.connected_account_type)
                     .map(s => s.connected_account_type)
             )];
-            const primaryWebhook = blueprint.steps.find(s => s.n8nWebhookId)?.n8nWebhookId || null;
+            const primaryWebhook = sanitizedSteps.find(s => s.n8nWebhookId)?.n8nWebhookId || null;
             const primaryAccount = connectedAccounts[0] || null;
 
             const automationName = blueprint.name || "AI-Created Automation";
@@ -100,7 +115,7 @@ router.post('/chat', authMiddleware, async (req, res) => {
             const newAutomation = {
                 uid,
                 name: automationName,
-                steps: blueprint.steps,
+                steps: sanitizedSteps,
                 edges: blueprint.edges || [],
                 inputs: {},
                 n8nWebhookId: primaryWebhook,
@@ -109,6 +124,7 @@ router.post('/chat', authMiddleware, async (req, res) => {
                 status: "active",
                 icon: "smart_toy",
                 source: "ai-chat",
+                isCustom: true,   // marks it as a canvas automation so "Edit in Canvas" button shows
                 createdAt: now,
                 updatedAt: now
             };
