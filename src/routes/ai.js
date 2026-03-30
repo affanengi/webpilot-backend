@@ -95,6 +95,7 @@ router.post('/chat', authMiddleware, async (req, res) => {
             const primaryAccount = connectedAccounts[0] || null;
 
             const automationName = blueprint.name || "AI-Created Automation";
+            const now = new Date();
 
             const newAutomation = {
                 uid,
@@ -108,17 +109,33 @@ router.post('/chat', authMiddleware, async (req, res) => {
                 status: "active",
                 icon: "smart_toy",
                 source: "ai-chat",
-                createdAt: admin.firestore.FieldValue.serverTimestamp(),
-                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                createdAt: now,
+                updatedAt: now
             };
 
-            const docRef = await db.collection("users").doc(uid).collection("automations").add(newAutomation);
-            console.log(`[AI Chat] BUILD_AUTOMATION created: ${docRef.id} ("${automationName}") for user ${uid}`);
+            // Wrap Firestore write in a 12s timeout — never let a network blip crash the whole response
+            let automationId = null;
+            try {
+                const writePromise = db.collection("users").doc(uid).collection("automations").add(newAutomation);
+                const timeoutPromise = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error("Firestore write timed out")), 12000)
+                );
+                const docRef = await Promise.race([writePromise, timeoutPromise]);
+                automationId = docRef.id;
+                console.log(`[AI Chat] BUILD_AUTOMATION created: ${automationId} ("${automationName}") for user ${uid}`);
+            } catch (fsErr) {
+                console.error(`[AI Chat] Firestore write failed for BUILD_AUTOMATION ("${automationName}"):`, fsErr.message);
+                // Still respond with a success message — user gets feedback, they can retry
+                return res.json({
+                    success: false,
+                    message: `I designed your **${automationName}** automation but couldn't save it right now due to a connection issue. Please try again in a moment. ⚠️`
+                });
+            }
 
             return res.json({
                 success: true,
                 intent: "BUILD_AUTOMATION",
-                automationId: docRef.id,
+                automationId,
                 automationName,
                 nodeCount: blueprint.steps.length,
                 message: `I've built your **${automationName}** automation with ${blueprint.steps.length} node${blueprint.steps.length !== 1 ? "s" : ""}! Open it in the canvas to configure any settings and execute it when ready. 🚀`
