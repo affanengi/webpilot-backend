@@ -38,6 +38,9 @@ app.use("/automations", automationsRoutes);
 const webhooksRoutes = require("./routes/webhooks");
 app.use("/webhooks", webhooksRoutes);
 
+const aiRoutes = require("./routes/ai");
+app.use("/ai", aiRoutes);
+
 const schedulerService = require("./services/schedulerService");
 
 const PORT = process.env.PORT || 5000;

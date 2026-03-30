@@ -1,0 +1,267 @@
+const express = require('express');
+const router = express.Router();
+const db = require('../services/firestore');
+const admin = require('../services/firebase');
+const authMiddleware = require('../middleware/auth');
+const n8nService = require('../services/n8n');
+const oauthService = require('../services/oauth');
+const aiService = require('../services/aiService');
+const { automations: templateAutomations } = require('../data/automations');
+
+/**
+ * Helper — reads a user's OAuth token from the connected_accounts subcollection
+ * (same path as workflowEngine uses), auto-refreshes if expired.
+ * Returns the raw accessToken string or null if not connected.
+ */
+async function getUserToken(uid, provider) {
+    const aliases = [provider, provider === "google_drive" ? "google" : null].filter(Boolean);
+
+    let tokenData = null;
+    let tokenDocRef = null;
+
+    for (const alias of aliases) {
+        const tokenDoc = await db.collection("users").doc(uid).collection("connected_accounts").doc(alias).get();
+        if (tokenDoc.exists) {
+            tokenData = tokenDoc.data();
+            tokenDocRef = tokenDoc.ref;
+            break;
+        }
+    }
+
+    if (!tokenData) return null;
+
+    // Auto-refresh if within 5 minutes of expiry
+    const isExpired = tokenData.expiresAt && tokenData.expiresAt.toDate() < new Date(Date.now() + 5 * 60000);
+    if (isExpired && tokenData.refreshToken) {
+        try {
+            const newTokens = await oauthService.refreshAccessToken(provider, tokenData.refreshToken);
+            const updates = { accessToken: newTokens.access_token, lastUpdated: admin.firestore.FieldValue.serverTimestamp() };
+            if (newTokens.expires_in) updates.expiresAt = new Date(Date.now() + (newTokens.expires_in * 1000));
+            if (newTokens.refresh_token) updates.refreshToken = newTokens.refresh_token;
+            await tokenDocRef.update(updates);
+            return newTokens.access_token;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    return tokenData.accessToken || null;
+}
+
+/**
+ * POST /ai/chat
+ * Main AI chat endpoint — classifies intent, validates required inputs,
+ * fetches real OAuth tokens from the user's connected_accounts subcollection,
+ * and triggers the N8N webhook with all credentials and Gemini API key injected.
+ */
+router.post('/chat', authMiddleware, async (req, res) => {
+    try {
+        const { prompt } = req.body;
+        const uid = req.user.uid;
+
+        if (!prompt) {
+            return res.status(400).json({ success: false, error: "Prompt is required" });
+        }
+
+        // 1. Coordinator Intent Classification
+        const classification = await aiService.determineIntent(prompt);
+        console.log(`[AI Chat] User ${uid} intent:`, classification.intent);
+
+        if (classification.intent === 'SMALL_TALK') {
+            return res.json({
+                success: true,
+                message: classification.response || "I'm here to help you automate! Try asking me to post to LinkedIn or upload to YouTube."
+            });
+        }
+
+        if (classification.intent === 'BUILD_NEW') {
+            return res.json({
+                success: true,
+                message: classification.summary || "I can build a custom automation blueprint for that. This feature is coming soon — stay tuned! 🛠️"
+            });
+        }
+
+        // 2. TRIGGER_EXISTING — find the best matching template
+        const match = await aiService.findBestTemplateMatch(prompt, templateAutomations);
+        if (!match) {
+            return res.json({
+                success: false,
+                needsInput: true,
+                message: "I couldn't find a matching automation for that request. Could you be more specific? For example: **Post a tech article to LinkedIn** or **Upload a video to YouTube**."
+            });
+        }
+
+        console.log(`[AI Chat] Matched template: ${match.id} ("${match.title}") for user ${uid}`);
+
+        // 3. Check required inputs — ask user if they're missing
+        const requiredInputs = (match.inputs || []).filter(inp => inp.required && !inp.dependency);
+        const missingFields = [];
+
+        for (const inp of requiredInputs) {
+            const paramKey = inp.id;
+            if (!classification.parameters || !classification.parameters[paramKey]) {
+                missingFields.push({ id: inp.id, label: inp.label, placeholder: inp.placeholder });
+            }
+        }
+
+        if (missingFields.length > 0) {
+            const fieldDescriptions = missingFields
+                .map(f => `**${f.label}** (e.g. "${f.placeholder || 'your value'}")`)
+                .join(', ');
+            return res.json({
+                success: true,
+                needsInput: true,
+                templateId: match.id,
+                templateTitle: match.title,
+                missingFields,
+                message: `To run **${match.title}**, I need a bit more information:\n\n${fieldDescriptions}\n\nJust reply with those details and I'll start the automation right away! 🚀`
+            });
+        }
+
+        // 4. Fetch real OAuth tokens from the user's connected_accounts subcollection
+        //    (mirrors exactly what workflowEngine.js does — no stale root-doc data)
+        const providerMap = {
+            googleOAuth2Api: "google",
+            googleSheetsOAuth2Api: "google_sheets",
+            linkedInOAuth2Api: "linkedin",
+            googleDriveOAuth2Api: "google_drive",
+            notionApi: "notion",
+            youTubeOAuth2Api: "youtube"
+        };
+
+        const credentialsData = {};
+        for (const [credKey, provider] of Object.entries(providerMap)) {
+            const token = await getUserToken(uid, provider);
+            credentialsData[credKey] = token; // null if not connected — N8N handles it
+        }
+
+
+        console.log(`[AI Chat] Credentials fetched for ${uid}. Connected providers:`, Object.values(providerMap).filter(p => p));
+
+
+        // 5. Validate that required accounts are connected
+        const requiredAccounts = match.connected_accounts || (match.connected_account_type ? [match.connected_account_type] : []);
+        const missingAccounts = [];
+        for (const acct of requiredAccounts) {
+            const token = await getUserToken(uid, acct);
+            if (!token) missingAccounts.push(acct);
+        }
+
+        if (missingAccounts.length > 0) {
+            const friendlyNames = { linkedin: "LinkedIn", google: "Google", google_drive: "Google Drive", notion: "Notion", youtube: "YouTube" };
+            const names = missingAccounts.map(a => friendlyNames[a] || a).join(", ");
+            return res.json({
+                success: false,
+                needsInput: true,
+                message: `To run **${match.title}**, you need to connect these accounts first: **${names}**.\n\nGo to [Connected Accounts](/connected-accounts) to link them and then try again! 🔗`
+            });
+        }
+
+        // 6. Create execution log with `timestamp` field so ExecutionLogs.jsx can find it
+        const executionRef = await db.collection("users").doc(uid).collection("execution_logs").add({
+            automationId: "ai-generated",
+            automationName: match.title,
+            icon: match.icon || "smart_toy",
+            status: "Running",
+            message: `Starting ${match.title}...`,
+            timestamp: admin.firestore.FieldValue.serverTimestamp() // ← must match what ExecutionLogs.jsx queries on
+        });
+
+        const executionId = executionRef.id;
+        console.log(`[AI Chat] Execution log created: ${executionId}`);
+
+        // 7. Build tokens in exactly the same structure workflowEngine.js produces
+        //    so all existing N8N code nodes work without modification.
+        //
+        //    workflowEngine sends:
+        //      tokens: { linkedin: "TOKEN", google: "TOKEN" }
+        //      linkedinToken: "TOKEN"            ← camelCase alias
+        //      linkedin_token: "TOKEN"           ← snake_case alias (if provider had underscore)
+        //      access_token: "TOKEN"             ← first account's raw token
+        //      gemini_api_key: "KEY"             ← snake_case (what N8N nodes reference)
+        //      automationId / uid / executionId
+
+        // Build tokens map { provider: rawAccessToken }
+        const tokensMap = {};
+        const namedTokens = {};
+
+        for (const [credKey, provider] of Object.entries(providerMap)) {
+            const rawToken = credentialsData[credKey];
+            if (rawToken) {
+                tokensMap[provider] = rawToken;
+
+                // camelCase alias: linkedin → linkedinToken
+                const camelKey = provider.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+                namedTokens[`${camelKey}Token`] = rawToken;
+
+                // snake_case alias for providers with underscore: google_drive → google_drive_token
+                if (provider.includes('_')) {
+                    namedTokens[`${provider}_token`] = rawToken;
+                }
+            }
+        }
+
+        const primaryToken = requiredAccounts.length > 0 ? tokensMap[requiredAccounts[0]] : null;
+
+        const payload = {
+            // User-provided parameters from the AI (post_topic, post_tone, etc.)
+            ...(classification.parameters || {}),
+
+            // Nested tokens map — N8N "Single Topic Setup" reads body.tokens?.linkedin
+            tokens: tokensMap,
+
+            // Flat token aliases — same as workflowEngine
+            ...namedTokens,
+
+            // Primary account's raw token at root level
+            access_token: primaryToken,
+
+            // Gemini API key for N8N content generation (LinkedIn/YouTube writing)
+            gemini_api_key: process.env.GEMINI_API_KEY_2,
+
+            // Execution context
+            automationId: "ai-generated",
+            uid: uid,
+            executionId,
+            userId: uid
+        };
+
+        // 8. Respond immediately — fire N8N async
+        const webhookId = match.n8nWebhookId;
+        if (!webhookId) {
+            await executionRef.update({
+                status: "Failed",
+                message: "This automation template is missing its webhook configuration.",
+                timestamp: admin.firestore.FieldValue.serverTimestamp()
+            });
+            return res.json({
+                success: false,
+                error: `The template "${match.title}" is not fully configured yet.`
+            });
+        }
+
+        // Fire the webhook asynchronously — update log on failure
+        n8nService.triggerAutomation(webhookId, payload).catch(async (err) => {
+            console.error(`[AI Chat] N8N webhook failed for ${match.id}:`, err.message);
+            await executionRef.update({
+                status: "Failed",
+                message: `Workflow error: ${err.message}`,
+                timestamp: admin.firestore.FieldValue.serverTimestamp()
+            });
+        });
+
+        return res.json({
+            success: true,
+            message: `Started your **${match.title}** automation! I'll let you know once it's done. 🚀`,
+            templateId: match.id,
+            templateTitle: match.title,
+            executionId
+        });
+
+    } catch (error) {
+        console.error("[AI Chat] Internal error:", error);
+        res.status(500).json({ success: false, error: "Internal server error during chat processing." });
+    }
+});
+
+module.exports = router;

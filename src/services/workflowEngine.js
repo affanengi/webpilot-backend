@@ -81,7 +81,7 @@ async function executeN8NWebhook(uid, executionId, stepData, logRef, rootAutomat
         tokens: tokensPayload,
         access_token: accountsToFetch.length > 0 ? tokensPayload[accountsToFetch[0]] : null,
         ...namedTokens,
-        gemini_api_key: process.env.GEMINI_API_KEY,
+        gemini_api_key: process.env.GEMINI_API_KEY_2,
         automationId: rootAutomationId,
         uid: uid,
         executionId: executionId,
