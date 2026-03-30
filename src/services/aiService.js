@@ -59,12 +59,12 @@ async function determineIntent(prompt) {
    Node type mapping (ALWAYS use these exact values):
    - "schedule trigger" / "scheduled" / "cron"   → type: "scheduleNode"
    - "manual trigger" / "on click" / "button"     → type: "manualTriggerNode"
-   - "linkedin post" / "post to linkedin"         → type: "actionNode", n8nWebhookId: "linkedin-post", connected_account_type: "linkedin"
-   - "youtube upload" / "upload to youtube"       → type: "actionNode", n8nWebhookId: "advanced-youtube-upload", connected_account_type: "youtube"
-   - "notion notes" / "create notion"             → type: "actionNode", n8nWebhookId: "notion-ai-notes", connected_account_type: "notion"
-   - "send email" / "gmail" / "bulk email"        → type: "actionNode", n8nWebhookId: "gmail-send", connected_account_type: "google"
-   - "google drive" / "create folder"             → type: "actionNode", n8nWebhookId: "google-drive", connected_account_type: "google_drive"
-   - "google docs" / "create doc"                 → type: "actionNode", n8nWebhookId: "google-docs-automation", connected_account_type: "google_docs"
+   - "linkedin post" / "post to linkedin"         → type: "automationNode", n8nWebhookId: "linkedin-post", connected_account_type: "linkedin"
+   - "youtube upload" / "upload to youtube"       → type: "automationNode", n8nWebhookId: "advanced-youtube-upload", connected_account_type: "youtube"
+   - "notion notes" / "create notion"             → type: "automationNode", n8nWebhookId: "notion-ai-notes", connected_account_type: "notion"
+   - "send email" / "gmail" / "bulk email"        → type: "automationNode", n8nWebhookId: "gmail-send", connected_account_type: "google"
+   - "google drive" / "create folder"             → type: "automationNode", n8nWebhookId: "google-drive", connected_account_type: "google_drive"
+   - "google docs" / "create doc"                 → type: "automationNode", n8nWebhookId: "google-docs-automation", connected_account_type: "google_docs"
    - "wait" / "pause" / "delay"                   → type: "waitNode"
    - "if" / "condition" / "branch"                → type: "ifNode"
 4. 'BUILD_NEW': Fallback only. User mentions building but it's too vague to extract nodes. Provide a 'summary'.
