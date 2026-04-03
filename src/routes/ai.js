@@ -100,6 +100,45 @@ router.post('/chat', authMiddleware, async (req, res) => {
             });
         }
 
+        if (classification.intent === 'EDIT_AUTOMATION') {
+            const { automationId, automationName } = classification;
+            if (!automationId) {
+                return res.json({
+                    success: true,
+                    message: "I couldn't find the automation you want to edit. Please verify the exact name."
+                });
+            }
+
+            const docRef = db.collection("users").doc(uid).collection("automations").doc(automationId);
+            const docSnap = await docRef.get();
+
+            if (!docSnap.exists) {
+                return res.json({
+                    success: true,
+                    message: `I couldn't find the automation **${automationName}** in your account.`
+                });
+            }
+
+            try {
+                const proposedState = await aiService.proposeWorkflowEdit(prompt, docSnap.data());
+                
+                return res.json({
+                    success: true,
+                    intent: 'workflow-proposal',
+                    automationId,
+                    automationName: automationName || "Automation",
+                    proposedState,
+                    message: `I've drafted the changes for **${automationName || "Automation"}**! Please review the preview before saving.`
+                });
+            } catch (err) {
+                console.error("Workflow Edit Error:", err);
+                return res.json({
+                    success: true,
+                    message: "Sorry, I ran into an issue while trying to modify the workflow. Please try again."
+                });
+            }
+        }
+
         if (classification.intent === 'CONNECT_ACCOUNT' || classification.intent === 'DISCONNECT_ACCOUNT') {
             const { provider } = classification;
             if (!provider) {

@@ -41,13 +41,19 @@ async function executeN8NWebhook(uid, executionId, stepData, logRef, rootAutomat
                 const updates = { accessToken: newTokens.access_token, lastUpdated: admin.firestore.FieldValue.serverTimestamp() };
                 if (newTokens.expires_in) updates.expiresAt = new Date(Date.now() + (newTokens.expires_in * 1000));
                 if (newTokens.refresh_token) updates.refreshToken = newTokens.refresh_token;
+                // Clear reconnect flag on successful refresh
+                updates.requiresReconnect = false;
                 await tokenDocRef.update(updates);
                 tokenData.accessToken = newTokens.access_token;
             } catch (err) {
-                throw new Error(`Failed to refresh ${accountType} session.`);
+                // Mark the token as needing manual reconnect
+                await tokenDocRef.update({ requiresReconnect: true }).catch(() => {});
+                throw new Error(`Failed to refresh ${accountType} session. Please reconnect ${accountType} in Connected Accounts and try again.`);
             }
         } else if (isExpired && !tokenData.refreshToken) {
-            throw new Error(`Session expired for ${accountType}. Please reconnect.`);
+            // No refresh token stored — mark as needing manual reconnect
+            await tokenDocRef.update({ requiresReconnect: true }).catch(() => {});
+            throw new Error(`${accountType} session expired and cannot be refreshed automatically. Please reconnect ${accountType} in Connected Accounts.`);
         }
 
         tokensPayload[accountType] = tokenData.accessToken;

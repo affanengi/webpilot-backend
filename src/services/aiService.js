@@ -67,13 +67,15 @@ async function determineIntent(prompt, userContext = {}) {
 ${automationsList || "   (No existing automations found)"}
    - Extract 'automationId' and 'automationName' of the exact match. Pay close attention to the automation name and location (Custom Automations Tab vs My Automations Tab).
    - DO NOT guess partial matches. If there is no strong, confident match, OMIT 'automationId' completely rather than accidentally deleting the wrong flow.
-6. 'CONNECT_ACCOUNT': User asks to connect a platform account (Google, Youtube, Linkedin, Notion, etc.). 
+6. 'EDIT_AUTOMATION': User wants to modify, edit, or update an existing automation. Match their request strictly to one of these user automations by EXACT NAME and LOCATION (like DELETE_AUTOMATION does).
+   - Extract 'automationId' and 'automationName' of the exact match. DO NOT guess partial matches.
+7. 'CONNECT_ACCOUNT': User asks to connect a platform account (Google, Youtube, Linkedin, Notion, etc.). 
    - Extract 'provider' as one of: "google", "youtube", "linkedin", "notion", "instagram", "gmail", "google_drive", "google_docs", "google_sheets". Defaults to lowercased platform name.
-7. 'DISCONNECT_ACCOUNT': User asks to disconnect a platform account. Extract 'provider' using the same list above.
+8. 'DISCONNECT_ACCOUNT': User asks to disconnect a platform account. Extract 'provider' using the same list above.
 
 Respond in strict JSON:
 {
-  "intent": "SMALL_TALK" | "TRIGGER_EXISTING" | "BUILD_AUTOMATION" | "BUILD_NEW" | "DELETE_AUTOMATION" | "CONNECT_ACCOUNT" | "DISCONNECT_ACCOUNT",
+  "intent": "SMALL_TALK" | "TRIGGER_EXISTING" | "BUILD_AUTOMATION" | "BUILD_NEW" | "DELETE_AUTOMATION" | "EDIT_AUTOMATION" | "CONNECT_ACCOUNT" | "DISCONNECT_ACCOUNT",
   "response": "...",
   "parameters": { "post_topic": "...", "post_tone": "Professional" },
   "automationBlueprint": { "name": "...", "steps": [...], "edges": [...] },
@@ -85,7 +87,7 @@ Respond in strict JSON:
 
 Rules:
 - Include only relevant keys (omit null/empty ones).
-- For DELETE_AUTOMATION: Always include automationId and automationName if matched.
+- For DELETE_AUTOMATION and EDIT_AUTOMATION: Always include automationId and automationName if matched.
 - For CONNECT_ACCOUNT / DISCONNECT_ACCOUNT: Always include 'provider'.
 - For TRIGGER_EXISTING: always include 'parameters' even if empty ({}).
 - For BUILD_AUTOMATION: always include 'automationBlueprint'. Generate step ids as "step_1", "step_2", etc.
@@ -152,9 +154,60 @@ Respond with ONLY valid JSON:
     return null;
 }
 
+/**
+ * proposeWorkflowEdit — takes the existing automation data and modifies it according to the prompt.
+ */
+async function proposeWorkflowEdit(prompt, automationData) {
+    // Hide large/irrelevant data fields to save tokens
+    const { id, uid, createdAt, updatedAt, originalTemplateId, status, ...minimalData } = automationData;
+    
+    // We only pass nodes/steps, edges, and inputs
+    const currentJson = JSON.stringify(minimalData, null, 2);
+
+    const instruction = `You are a strict JSON manipulator for the WebPilot platform.
+The user wants to modify their existing automation workflow.
+Here is the current JSON state of their automation:
+${currentJson}
+
+Modify this JSON according to the user's instructions.
+Rules:
+1. Return ONLY the fully modified JSON object. Do NOT wrap it in a root object unless it already was, it should match the schema provided.
+2. Standard Tool Nodes allowed:
+   - "schedule trigger" / "scheduled" / "cron"   → type: "scheduleNode"
+   - "manual trigger" / "button"                 → type: "manualTriggerNode"
+   - "linkedin post"                             → type: "automationNode", n8nWebhookId: "linkedin-post", connected_account_type: "linkedin"
+   - "youtube upload"                            → type: "automationNode", n8nWebhookId: "advanced-youtube-upload", connected_account_type: "youtube"
+   - "notion notes"                              → type: "automationNode", n8nWebhookId: "notion-ai-notes", connected_account_type: "notion"
+   - "send email" / "gmail"                      → type: "automationNode", n8nWebhookId: "gmail-send", connected_account_type: "google"
+   - "google drive"                              → type: "automationNode", n8nWebhookId: "google-drive", connected_account_type: "google_drive"
+   - "google docs"                               → type: "automationNode", n8nWebhookId: "google-docs-automation", connected_account_type: "google_docs"
+   - "wait" / "delay"                            → type: "waitNode"
+3. If removing or adding a node, re-calculate the "edges" array so the graph remains logically connected. Schema: { "id": "e1", "source": "step_1", "target": "step_2" }
+4. Update the "connected_accounts" array taking all unique "connected_account_type" values from your modified steps.
+5. ALWAYS preserve "isCustom": true.
+
+Respond strictly with valid JSON representing the new state. No markdown code block bounds.`;
+
+    try {
+        const response = await withRetry(() => ai.models.generateContent({
+            model: "gemini-3.1-flash-lite-preview",
+            contents: prompt,
+            config: {
+                systemInstruction: instruction,
+                responseMimeType: "application/json"
+            }
+        }));
+        return JSON.parse(response.text);
+    } catch (e) {
+        console.error("AI Workflow Edit Error:", e);
+        throw e;
+    }
+}
+
 module.exports = {
     determineIntent,
-    findBestTemplateMatch
+    findBestTemplateMatch,
+    proposeWorkflowEdit
 };
 
 
