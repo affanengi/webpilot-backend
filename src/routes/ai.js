@@ -7,6 +7,7 @@ const n8nService = require('../services/n8n');
 const oauthService = require('../services/oauth');
 const aiService = require('../services/aiService');
 const { automations: templateAutomations } = require('../data/automations');
+const axios = require('axios');
 
 /**
  * Helper — reads a user's OAuth token from the connected_accounts subcollection
@@ -14,7 +15,8 @@ const { automations: templateAutomations } = require('../data/automations');
  * Returns the raw accessToken string or null if not connected.
  */
 async function getUserToken(uid, provider) {
-    const aliases = [provider, provider === "google_drive" ? "google" : null].filter(Boolean);
+    // We must NOT alias google_drive or gmail to google to avoid Scope Insufficiency errors.
+    const aliases = [provider];
 
     let tokenData = null;
     let tokenDocRef = null;
@@ -430,6 +432,94 @@ router.post('/chat', authMiddleware, async (req, res) => {
     } catch (error) {
         console.error("[AI Chat] Internal error:", error);
         res.status(500).json({ success: false, error: "Internal server error during chat processing." });
+    }
+});
+
+/**
+ * POST /ai/export
+ * Exports AI generated content to Google Docs or Gmail Draft
+ */
+router.post('/export', authMiddleware, async (req, res) => {
+    let provider = 'google'; // default
+    try {
+        const { action, content } = req.body;
+        const uid = req.user.uid;
+
+        if (!action || !content) {
+            return res.status(400).json({ success: false, error: "Action and content are required" });
+        }
+
+        // Fetch token based on action. We must strictly use the correct provider to ensure we have the required scopes.
+        provider = action === 'docs' ? 'google_drive' : (action === 'gmail' ? 'gmail' : 'google'); 
+        const token = await getUserToken(uid, provider);
+
+        if (!token) {
+            return res.json({
+                success: false,
+                intent: 'CONNECT_ACCOUNT',
+                provider: provider,
+                message: `You need to connect your ${provider === 'google_drive' ? 'Google Docs' : provider === 'gmail' ? 'Gmail' : 'Google'} account to use this feature!`
+            });
+        }
+
+        if (action === 'docs') {
+            const rawResponse = await axios.post('https://docs.googleapis.com/v1/documents', {
+                title: 'AI Export'
+            }, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            const documentId = rawResponse.data.documentId;
+            
+            await axios.post(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
+                requests: [{
+                    insertText: {
+                        location: { index: 1 },
+                        text: content
+                    }
+                }]
+            }, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+
+            return res.json({
+                success: true,
+                url: `https://docs.google.com/document/d/${documentId}/edit`
+            });
+        } else if (action === 'gmail') {
+            const emailBody = `Subject: WebPilot AI Draft\n\n${content}`;
+            const encodedMessage = Buffer.from(emailBody).toString('base64url');
+
+            const draftResponse = await axios.post('https://gmail.googleapis.com/upload/gmail/v1/users/me/drafts', {
+                message: { raw: encodedMessage }
+            }, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+
+            const draftMessageId = draftResponse.data.message.id;
+            return res.json({
+                success: true,
+                url: `https://mail.google.com/mail/u/0/#drafts?compose=${draftMessageId}`
+            });
+        }
+
+        return res.status(400).json({ success: false, error: "Invalid action" });
+
+    } catch (error) {
+        console.error("[AI Export] Error:", error.response?.data || error.message);
+        
+        // Handle Insufficient Scopes / Permission Denied actively
+        const isPermissionDenied = error.response?.data?.error?.status === 'PERMISSION_DENIED' || error.response?.status === 403;
+        
+        if (isPermissionDenied) {
+            return res.json({
+                success: false,
+                intent: 'CONNECT_ACCOUNT',
+                provider: provider,
+                message: `Your connected account doesn't have enough permissions. Please reconnect your ${provider === 'google_drive' ? 'Google Docs' : provider === 'gmail' ? 'Gmail' : 'Google'} account.`
+            });
+        }
+        
+        res.status(500).json({ success: false, error: "Failed to export data. Token may be invalid or expired. Try reconnecting your account." });
     }
 });
 
