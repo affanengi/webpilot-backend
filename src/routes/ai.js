@@ -492,7 +492,6 @@ router.post('/export', authMiddleware, async (req, res) => {
                 'Content-Type: text/plain; charset="UTF-8"',
                 'Content-Transfer-Encoding: 7bit',
                 'Subject: WebPilot AI Draft',
-                'To: me',
                 '',
                 content
             ];
