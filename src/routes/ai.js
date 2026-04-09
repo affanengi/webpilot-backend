@@ -486,19 +486,31 @@ router.post('/export', authMiddleware, async (req, res) => {
                 url: `https://docs.google.com/document/d/${documentId}/edit`
             });
         } else if (action === 'gmail') {
-            const emailBody = `Subject: WebPilot AI Draft\n\n${content}`;
-            const encodedMessage = Buffer.from(emailBody).toString('base64url');
+            // RFC 2822 format with proper MIME headers
+            const emailLines = [
+                'MIME-Version: 1.0',
+                'Content-Type: text/plain; charset="UTF-8"',
+                'Content-Transfer-Encoding: 7bit',
+                'Subject: WebPilot AI Draft',
+                'To: me',
+                '',
+                content
+            ];
+            const encodedMessage = Buffer.from(emailLines.join('\r\n')).toString('base64url');
 
-            const draftResponse = await axios.post('https://gmail.googleapis.com/upload/gmail/v1/users/me/drafts', {
+            // Standard (non-upload) endpoint — accepts JSON
+            const draftResponse = await axios.post('https://gmail.googleapis.com/gmail/v1/users/me/drafts', {
                 message: { raw: encodedMessage }
             }, {
-                headers: { Authorization: `Bearer ${token}` }
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
             });
 
-            const draftMessageId = draftResponse.data.message.id;
             return res.json({
                 success: true,
-                url: `https://mail.google.com/mail/u/0/#drafts?compose=${draftMessageId}`
+                url: `https://mail.google.com/mail/u/0/#drafts`
             });
         }
 
