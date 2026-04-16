@@ -1,0 +1,272 @@
+{
+  "name": "GitHub Repository Manager (WebPilot)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "github-automation",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        250,
+        300
+      ],
+      "webhookId": "github-automation"
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.body.action }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "Create Repo"
+            },
+            {
+              "value2": "Delete Repo",
+              "output": 1
+            },
+            {
+              "value2": "Star Repo",
+              "output": 2
+            }
+          ]
+        },
+        "fallbackOutput": 3
+      },
+      "id": "2",
+      "name": "Action Switch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.github.com/user/repos",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Webhook').first().json.body.tokens?.github || $('Webhook').first().json.body.access_token }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "body": "={{ JSON.stringify({\n  name: $('Webhook').first().json.body.target_repo.includes('/') ? $('Webhook').first().json.body.target_repo.split('/')[1] : $('Webhook').first().json.body.target_repo,\n  private: $('Webhook').first().json.body.preferences?.toLowerCase().includes('private') ? true : false\n}) }}",
+        "options": {},
+        "contentType": "raw"
+      },
+      "id": "3",
+      "name": "Create Repo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        150
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=https://api.github.com/repos/{{ $('Webhook').first().json.body.target_repo.includes('/') ? $('Webhook').first().json.body.target_repo : `${$('Webhook').first().json.body.user?.email.split('@')[0]}/${$('Webhook').first().json.body.target_repo}` }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Webhook').first().json.body.tokens?.github || $('Webhook').first().json.body.access_token }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4",
+      "name": "Delete Repo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        350
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://api.github.com/user/starred/{{ $('Webhook').first().json.body.target_repo.includes('/') ? $('Webhook').first().json.body.target_repo : `${$('Webhook').first().json.body.user?.email.split('@')[0]}/${$('Webhook').first().json.body.target_repo}` }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Webhook').first().json.body.tokens?.github || $('Webhook').first().json.body.access_token }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "Content-Length",
+              "value": "0"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5",
+      "name": "Star Repo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        800,
+        550
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const webhookData = $('Webhook').first().json.body;\nconst action = webhookData.action;\nlet result = \"\";\n\nif (action === \"Create Repo\") {\n  const res = $('Create Repo').first();\n  if (res.json && res.json.html_url) {\n    result = `Successfully created repository: [${res.json.name}](${res.json.html_url})`;\n  } else {\n    result = `Failed to create repo. Server returned:\\n\\n\\`\\`\\`json\\n${JSON.stringify(res.json || res, null, 2)}\\n\\`\\`\\``;\n  }\n} else if (action === \"Delete Repo\") {\n  const res = $('Delete Repo').first();\n  // DELETE returns 204 No Content typically, which in n8n might be empty JSON or a specific property\n  if (res.json && res.json.message && res.json.message === \"Not Found\") {\n    result = `Error: Repository not found or you do not have permission to delete it.`;\n  } else {\n    result = `Successfully deleted repository: ${webhookData.target_repo}`;\n  }\n} else if (action === \"Star Repo\") {\n  const res = $('Star Repo').first();\n  if (res.json && res.json.message && res.json.message === \"Not Found\") {\n    result = `Error: Repository not found.`;\n  } else {\n    result = `Successfully starred repository: ${webhookData.target_repo}`;\n  }\n}\n\nreturn {\n  json: {\n    output: result\n  }\n};"
+      },
+      "id": "6",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        350
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://backend.affanmohd.online/webhooks/n8n/callback",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-n8n-api-key",
+              "value": "={{ $('Webhook').first().json.headers['x-n8n-api-key'] }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"uid\": $(\"Webhook\").first().json.body.uid, \"automationId\": $(\"Webhook\").first().json.body.automationId, \"executionId\": $(\"Webhook\").first().json.body.executionId, \"status\": \"successful\", \"message\": $json.output, \"automationName\": \"GitHub Automation\" } }}",
+        "options": {}
+      },
+      "id": "7",
+      "name": "Callback to WebPilot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1350,
+        350
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Action Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Action Switch": {
+      "main": [
+        [
+          {
+            "node": "Create Repo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Delete Repo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Star Repo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Repo": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Repo": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Star Repo": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response": {
+      "main": [
+        [
+          {
+            "node": "Callback to WebPilot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "1"
+}

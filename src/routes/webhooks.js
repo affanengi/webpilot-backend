@@ -16,7 +16,7 @@ router.post("/n8n/callback", async (req, res) => {
         }
 
         // 2. Extract Data
-        const { uid, automationId, status, resultLink, message, executionId } = req.body;
+        const { uid, automationId, status, resultLink, message, executionId, chartData } = req.body;
 
         if (!uid || !automationId) {
             return res.status(400).json({ error: "Missing uid or automationId in payload" });
@@ -35,6 +35,7 @@ router.post("/n8n/callback", async (req, res) => {
             resultUrl: resultLink || null,
             resultLink: resultLink || null,
             message: message || "Automation finished successfully",
+            chartData: chartData || null,
             timestamp: admin.firestore.FieldValue.serverTimestamp()
         };
 

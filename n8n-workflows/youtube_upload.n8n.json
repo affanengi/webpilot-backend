@@ -1,0 +1,466 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "advanced-youtube-upload",
+        "options": {}
+      },
+      "id": "fa40bfaf-4d2d-4fe1-8c60-b1a8018ff622",
+      "name": "Webhook Initiate",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        2032,
+        2768
+      ],
+      "webhookId": "e20a1d67-5810-4e0d-93be-f1f5455181cc"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $('Webhook Initiate').first().json.body.metadata_source }}",
+              "value2": "Google Sheet / CSV"
+            }
+          ]
+        }
+      },
+      "id": "aa44080f-e0a5-4e4e-87e7-96abe998850b",
+      "name": "3. Check Metadata Source (IF Node)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        2272,
+        2768
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// DATA ONLY — no HTTP requests\nconst body = $('Webhook Initiate').first().json.body;\n\nif (!body.video_source) throw new Error('Missing video_source (Google Drive File ID).');\nif (!body.tokens?.youtube) throw new Error('Missing YouTube token.');\nif (!body.tokens?.google_drive) throw new Error('Missing Google Drive token.');\n\nreturn [{\n  json: {\n    snippet: {\n      title: body.video_title || 'Untitled Video',\n      description: body.video_description || '',\n      tags: body.video_tags ? body.video_tags.split(',').map(t => t.trim()) : [],\n      categoryId: '22'\n    },\n    status: {\n      privacyStatus: (body.privacy_status || 'Private').toLowerCase()\n    },\n    _youtubeToken: body.tokens.youtube,\n    _driveToken: body.tokens.google_drive,\n    _driveFileId: body.video_source\n  }\n}];\n"
+      },
+      "id": "5364b645-79bf-453b-8f40-a591aec38834",
+      "name": "4B. Prepare Metadata (Manual)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2528,
+        2960
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json._youtubeToken }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Upload-Content-Type",
+              "value": "video/mp4"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { snippet: $json.snippet, status: $json.status } }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "ae41d294-a3b8-4b9c-957c-c9b242a03315",
+      "name": "4C. Initiate YouTube Upload (Manual)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2800,
+        2960
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $('4B. Prepare Metadata (Manual)').first().json._driveFileId }}?alt=media",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('4B. Prepare Metadata (Manual)').first().json._driveToken }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "8c3dbe9a-d47a-4395-af20-39458b8dba18",
+      "name": "4D. Download from Drive (Manual)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        3056,
+        2960
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $('4C. Initiate YouTube Upload (Manual)').first().json.headers.location }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('4B. Prepare Metadata (Manual)').first().json._youtubeToken }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "video/mp4"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "0e88f5c3-230c-426d-850a-c69decc423c2",
+      "name": "4E. Upload to YouTube (Manual)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        3312,
+        2960
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $('Webhook Initiate').first().json.body.metadata_sheet_id }}/values/A2:E2",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Webhook Initiate').first().json.body.tokens.youtube }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6c2ed9d7-a1aa-4666-935c-c737f079a981",
+      "name": "4A. Fetch Metadata from Sheets",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2528,
+        2560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// DATA ONLY — no HTTP requests\nconst body = $('Webhook Initiate').first().json.body;\nconst sheetsRow = $('4A. Fetch Metadata from Sheets').first().json;\nconst values = sheetsRow.values?.[0] || [];\n\nconst driveFileId = values[4] || body.video_source || '';\nif (!driveFileId) throw new Error('No Drive File ID in Sheet column E.');\nif (!body.tokens?.youtube) throw new Error('Missing YouTube token.');\nif (!body.tokens?.google_drive) throw new Error('Missing Google Drive token.');\n\nreturn [{\n  json: {\n    snippet: {\n      title: values[0] || 'Untitled Video',\n      description: values[1] || '',\n      tags: values[2] ? values[2].split(',').map(t => t.trim()) : [],\n      categoryId: '22'\n    },\n    status: {\n      privacyStatus: (values[3] || 'private').toLowerCase()\n    },\n    _youtubeToken: body.tokens.youtube,\n    _driveToken: body.tokens.google_drive,\n    _driveFileId: driveFileId\n  }\n}];\n"
+      },
+      "id": "8b62dda2-edac-4c7d-9d6d-7f079d83603c",
+      "name": "4A2. Prepare Metadata (Sheets)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2800,
+        2560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json._youtubeToken }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Upload-Content-Type",
+              "value": "video/mp4"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { snippet: $json.snippet, status: $json.status } }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "aa9b7b54-1db4-4068-bbf6-ac734a8807a8",
+      "name": "4A3. Initiate YouTube Upload (Sheets)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        3056,
+        2560
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $('4A2. Prepare Metadata (Sheets)').first().json._driveFileId }}?alt=media",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('4A2. Prepare Metadata (Sheets)').first().json._driveToken }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "c8d86db6-9a24-46dd-9e15-369af7486ab0",
+      "name": "4A4. Download from Drive (Sheets)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        3312,
+        2560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $('4A3. Initiate YouTube Upload (Sheets)').first().json.headers.location }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('4A2. Prepare Metadata (Sheets)').first().json._youtubeToken }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "video/mp4"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "e4d52706-7d67-4f93-8b81-412287aa203b",
+      "name": "4A5. Upload to YouTube (Sheets)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        3568,
+        2560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://backend.affanmohd.online/webhooks/n8n/callback",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-n8n-api-key",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwZWY4MjZlOS0wNjg2LTQyZTYtYWI5Ny1jMmZhYjMzZDY4ZGMiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY5NDk4MTMxfQ.3frCQXyY4qJDWGxoFdERmeC94Cj74b3IURRLqm9NF0U"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  uid: $('Webhook Initiate').first().json.body.uid,\n  automationId: $('Webhook Initiate').first().json.body.automationId,\n  executionId: $('Webhook Initiate').first().json.body.executionId,\n  status: 'Successful',\n  resultLink: 'https://www.youtube.com/watch?v=' + ($json.body?.id || $json.id || 'unknown'),\n  message: 'Video uploaded successfully'\n} }}",
+        "options": {}
+      },
+      "id": "5d856532-21c1-49f5-9d20-5cf9b5355299",
+      "name": "6. Send Success Log to WebPilot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        3840,
+        2768
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Initiate": {
+      "main": [
+        [
+          {
+            "node": "3. Check Metadata Source (IF Node)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3. Check Metadata Source (IF Node)": {
+      "main": [
+        [
+          {
+            "node": "4A. Fetch Metadata from Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "4B. Prepare Metadata (Manual)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4B. Prepare Metadata (Manual)": {
+      "main": [
+        [
+          {
+            "node": "4C. Initiate YouTube Upload (Manual)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4C. Initiate YouTube Upload (Manual)": {
+      "main": [
+        [
+          {
+            "node": "4D. Download from Drive (Manual)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4D. Download from Drive (Manual)": {
+      "main": [
+        [
+          {
+            "node": "4E. Upload to YouTube (Manual)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4E. Upload to YouTube (Manual)": {
+      "main": [
+        [
+          {
+            "node": "6. Send Success Log to WebPilot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4A. Fetch Metadata from Sheets": {
+      "main": [
+        [
+          {
+            "node": "4A2. Prepare Metadata (Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4A2. Prepare Metadata (Sheets)": {
+      "main": [
+        [
+          {
+            "node": "4A3. Initiate YouTube Upload (Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4A3. Initiate YouTube Upload (Sheets)": {
+      "main": [
+        [
+          {
+            "node": "4A4. Download from Drive (Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4A4. Download from Drive (Sheets)": {
+      "main": [
+        [
+          {
+            "node": "4A5. Upload to YouTube (Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4A5. Upload to YouTube (Sheets)": {
+      "main": [
+        [
+          {
+            "node": "6. Send Success Log to WebPilot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "92e68dbd508648748efd524fb8eb152e025360bb22e30e51b7ed700741996a08"
+  }
+}

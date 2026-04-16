@@ -295,7 +295,7 @@
           "parameters": [
             {
               "name": "x-n8n-api-key",
-              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwZWY4MjZlOS0wNjg2LTQyZTYtYWI5Ny1jMmZhYjMzZDY4ZGMiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY5NDk4MTMxfQ.3frCQXyY4qJDWGxoFdERmeC94Cj74b3IURRLqm9NF0U"
+              "value": "={{ $('Webhook').first().json.headers['x-n8n-api-key'] }}"
             }
           ]
         },

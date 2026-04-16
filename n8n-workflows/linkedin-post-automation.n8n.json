@@ -181,7 +181,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// No AI image — text only, carry context forward\nreturn { json: { ...$json, hasImage: false } };"
+        "jsCode": "// No AI image \u2014 text only, carry context forward\nreturn { json: { ...$json, hasImage: false } };"
       },
       "id": "62d12aec-1e19-4fe2-9db1-84ee71e23fb7",
       "name": "No Image (Text Only)",
@@ -278,7 +278,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Build the sheet update payload:\n//   Column B (Status) = 'Posted'\n//   Column C (Post URL) = LinkedIn post URL\n//   Column D (Posted Date) = Today's date\n//\n// LinkedIn API returns: { id: 'urn:li:ugcPost:XXXXXXXXX' }\nconst prev = $('Build UGC Post Body').item.json;\nconst postUrn = $json.id || '';\n\n// Convert URN to viewable URL: urn:li:ugcPost:1234 → https://www.linkedin.com/feed/update/urn:li:ugcPost:1234/\nconst postUrl = postUrn ? `https://www.linkedin.com/feed/update/${postUrn}/` : 'N/A';\n\nconst today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD\n\nreturn {\n  json: {\n    sheetsToken: prev._sheetsToken,\n    sheet_id: prev._sheet_id,\n    rowIndex: prev._rowIndex,\n    postUrl: postUrl,\n    postUrn: postUrn,\n    today: today,\n    topic: prev._topic,\n    callbackUrl: prev._callbackUrl\n  }\n};"
+        "jsCode": "// Build the sheet update payload:\n//   Column B (Status) = 'Posted'\n//   Column C (Post URL) = LinkedIn post URL\n//   Column D (Posted Date) = Today's date\n//\n// LinkedIn API returns: { id: 'urn:li:ugcPost:XXXXXXXXX' }\nconst prev = $('Build UGC Post Body').item.json;\nconst postUrn = $json.id || '';\n\n// Convert URN to viewable URL: urn:li:ugcPost:1234 \u2192 https://www.linkedin.com/feed/update/urn:li:ugcPost:1234/\nconst postUrl = postUrn ? `https://www.linkedin.com/feed/update/${postUrn}/` : 'N/A';\n\nconst today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD\n\nreturn {\n  json: {\n    sheetsToken: prev._sheetsToken,\n    sheet_id: prev._sheet_id,\n    rowIndex: prev._rowIndex,\n    postUrl: postUrl,\n    postUrn: postUrn,\n    today: today,\n    topic: prev._topic,\n    callbackUrl: prev._callbackUrl\n  }\n};"
       },
       "id": "fb99108a-c060-4be8-b30b-488f87b53ff8",
       "name": "Prepare Sheet Update",
@@ -359,7 +359,7 @@
           "parameters": [
             {
               "name": "x-n8n-api-key",
-              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwZWY4MjZlOS0wNjg2LTQyZTYtYWI5Ny1jMmZhYjMzZDY4ZGMiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY5NDk4MTMxfQ.3frCQXyY4qJDWGxoFdERmeC94Cj74b3IURRLqm9NF0U"
+              "value": "={{ $('Webhook').first().json.headers['x-n8n-api-key'] }}"
             }
           ]
         },

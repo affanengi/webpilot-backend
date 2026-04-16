@@ -663,6 +663,69 @@ const automations = [
             { id: "case_3", label: "Case 3 Value", type: "text", placeholder: "Option C" },
             { id: "case_4", label: "Case 4 Value", type: "text", placeholder: "Option D" }
         ]
+    },
+    {
+        id: "data-results-analyzer",
+        title: "Data Results Analyzer",
+        icon: "bar_chart",
+        description: "Analyze any Google Sheet, CSV, or Excel file with AI.",
+        status: "enabled",
+        about: {
+            description: "Point it at any file in your Google Drive — Google Sheet, CSV, or Excel — and get AI-generated insights and interactive charts without writing a single formula.",
+            howItWorks: [
+                "You provide the file name as it appears in Google Drive.",
+                "The automation finds, retrieves, and parses all rows automatically.",
+                "Gemini AI analyzes the data and, if requested, generates interactive charts."
+            ],
+            runtime: "1 - 3 mins",
+            executionType: "Manual"
+        },
+        docs: {
+            overview: "The Data Results Analyzer finds your file in Google Drive by name, reads its data (whether it is a Google Sheet, CSV, or uploaded Excel file), and uses Gemini AI to produce written insights and chart configurations. Results appear directly in your execution log.",
+            setup: [
+                "Connect your Google Drive and Google Sheets accounts in Connected Accounts.",
+                "Enter the exact file name as it appears in your Google Drive.",
+                "Describe what you want to analyze or investigate in the Analysis Prompt field.",
+                "Toggle 'Generate Charts' on if you want visual charts alongside the text insights.",
+                "Save and Execute."
+            ],
+            errorHandling: [
+                { error: "No file found in Google Drive", fix: "Make sure the file name matches exactly (case-sensitive) and the file is not in the Trash. Use the name shown in Google Drive, not a URL." },
+                { error: "Could not parse file data", fix: "Ensure the file is a Google Sheet, a CSV file, or an Excel file with at least one sheet of data and column headers in the first row." },
+                { error: "AI visualization failed", fix: "The analysis will still return text insights. Complex or very large datasets may cause chart generation to fail — try narrowing your analysis prompt." }
+            ],
+            tips: [
+                "Column headers matter — make sure the first row of your sheet has clear, descriptive names.",
+                "For best chart results, describe the specific columns you want compared in the Analysis Prompt.",
+                "Click 'Analyze Results' in the execution log to open the full-screen interactive chart dashboard."
+            ]
+        },
+        connected_accounts: ["google_drive", "google_sheets"],
+        n8nWebhookId: "data-results-analyzer",
+        inputs: [
+            {
+                id: "file_name",
+                label: "File Name in Google Drive",
+                type: "text",
+                placeholder: "e.g., Sales Data Q1 2025",
+                required: true,
+                helperText: "Enter the exact file name — not a URL or Drive ID. Must be a Google Sheet, CSV, or Excel file."
+            },
+            {
+                id: "analysis_prompt",
+                label: "What do you want to analyze?",
+                type: "textarea",
+                placeholder: "e.g., Show me the top 5 products by revenue. Which region has the lowest sales?",
+                required: true
+            },
+            {
+                id: "include_visualization",
+                label: "Generate Charts",
+                type: "toggle",
+                defaultValue: true,
+                helperText: "When enabled, results include interactive bar, pie, and line charts. Click 'Analyze Results' in the execution log to view them."
+            }
+        ]
     }
 ];
 

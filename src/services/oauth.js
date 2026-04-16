@@ -72,6 +72,25 @@ const PROVIDERS = {
         scope: "instagram_basic instagram_content_publish pages_show_list pages_read_engagement",
         profileUrl: "https://graph.facebook.com/me?fields=id,name,email,picture",
         envPrefix: "INSTAGRAM"
+    },
+    github: {
+        authUrl: "https://github.com/login/oauth/authorize",
+        tokenUrl: "https://github.com/login/oauth/access_token",
+        scope: "repo delete_repo user:email",
+        profileUrl: "https://api.github.com/user",
+        envPrefix: "GITHUB",
+        useJsonPayload: true,
+        customHeaders: {
+            "Accept": "application/json",
+            "X-GitHub-Api-Version": "2022-11-28"
+        }
+    },
+    google_forms: {
+        authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+        tokenUrl: "https://oauth2.googleapis.com/token",
+        scope: "https://www.googleapis.com/auth/forms.body https://www.googleapis.com/auth/forms.responses.readonly https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile",
+        profileUrl: "https://www.googleapis.com/oauth2/v2/userinfo",
+        envPrefix: "GOOGLE" 
     }
 };
 
@@ -196,7 +215,7 @@ exports.getUserProfile = async (provider, accessToken) => {
     const data = response.data;
 
     // Normalize data
-    if (provider === "google" || provider === "gmail" || provider === "youtube" || provider === "google_drive" || provider === "google_sheets" || provider === "google_docs") {
+    if (provider === "google" || provider === "gmail" || provider === "youtube" || provider === "google_drive" || provider === "google_sheets" || provider === "google_docs" || provider === "google_forms") {
         return {
             providerUserId: data.id,
             email: data.email,
@@ -224,6 +243,13 @@ exports.getUserProfile = async (provider, accessToken) => {
             email: data.bot?.owner?.user?.person?.email || null,
             name: data.bot?.owner?.user?.name || data.name || "Notion Integration",
             picture: data.bot?.owner?.user?.avatar_url || data.avatar_url || null
+        };
+    } else if (provider === "github") {
+        return {
+            providerUserId: data.id.toString(),
+            email: data.email || null,
+            name: data.name || data.login,
+            picture: data.avatar_url || null
         };
     }
 };

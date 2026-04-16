@@ -1,0 +1,458 @@
+{
+  "name": "Google Forms Manager (WebPilot)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "google-forms",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "7a91946e-c88b-492f-bb60-d84ee26095e1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        192,
+        800
+      ],
+      "webhookId": "google-forms"
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.body.action }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "Create Form",
+              "output": 0
+            },
+            {
+              "value2": "Delete Form",
+              "output": 1
+            },
+            {
+              "value2": "Publish Form",
+              "output": 2
+            }
+          ]
+        },
+        "fallbackOutput": 2
+      },
+      "id": "77b3ae93-3267-49cd-b07a-d46fb4cc5565",
+      "name": "Action Switch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [
+        400,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://forms.googleapis.com/v1/forms",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Webhook').first().json.body.tokens?.google_forms || $('Webhook').first().json.body.access_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { info: { title: $('Webhook').first().json.body.form_identifier, documentTitle: $('Webhook').first().json.body.form_identifier } } }}",
+        "options": {}
+      },
+      "id": "7dbc5fab-0585-484d-8dd8-e2f8597d76f1",
+      "name": "Create Form Shell",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        592,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ !!$('Webhook').first().json.body.details }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "570e4406-4b9d-4f91-b908-dc617812dfc0",
+      "name": "Has Questions?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        800,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={{ $('Webhook').first().json.body.gemini_api_key }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ ({\n  contents: [\n    {\n      parts: [\n        {\n          text: \"You are an API builder for Google Forms. Construct an array of 'createItem' request objects based on the user's instructions.\\n\\nUser Instructions: \" + $('Webhook').first().json.body.details + \"\\n\\nCRITICAL SCHEMA RULES:\\n1. The ONLY valid question types inside 'question' are: 'textQuestion', 'choiceQuestion', 'scaleQuestion', 'dateQuestion', 'timeQuestion'.\\n2. There is NO 'multipleChoiceQuestion' or 'checkboxQuestion'. For these, use 'choiceQuestion' with 'type': 'RADIO' (for multiple choice), 'CHECKBOX', or 'DROP_DOWN'.\\n3. Example for Choice: { \\\"choiceQuestion\\\": { \\\"type\\\": \\\"RADIO\\\", \\\"options\\\": [ { \\\"value\\\": \\\"Yes\\\" }, { \\\"value\\\": \\\"No\\\" } ] } }\\n\\nReturn ONLY a raw JSON array of the 'createItem' requests perfectly formatted for the batchUpdate API. Do not wrap in markdown.\\nExample format:\\n[\\n  { \\\"createItem\\\": { \\\"item\\\": { \\\"title\\\": \\\"Your name?\\\", \\\"questionItem\\\": { \\\"question\\\": { \\\"textQuestion\\\": {} } } }, \\\"location\\\": { \\\"index\\\": 0 } } }\\n]\"\n        }\n      ]\n    }\n  ],\n  generationConfig: {\n    responseMimeType: \"application/json\",\n    maxOutputTokens: 1024\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "c5fcc90f-4ef1-4f4c-825c-9ce525630db4",
+      "name": "Gemini Build Questions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        992,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n  let aiText = $('Gemini Build Questions').first().json.candidates[0].content.parts[0].text;\n  aiText = aiText.replace(/```json/g, '').replace(/```/g, '').trim();\n  const requestsArray = JSON.parse(aiText);\n  return { json: { requests: requestsArray } };\n} catch(e) {\n  return { json: { requests: [] } };\n}"
+      },
+      "id": "564a4da0-5367-4d45-896e-b192d6ab8bab",
+      "name": "Parse Questions JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://forms.googleapis.com/v1/forms/{{ $('Create Form Shell').first().json.formId }}:batchUpdate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Webhook').first().json.body.tokens?.google_forms || $('Webhook').first().json.body.access_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "5e7a4b46-7d2e-45a6-81cf-431cd63b0ea0",
+      "name": "Inject Questions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1392,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://www.googleapis.com/drive/v3/files?q=name%3D'{{ encodeURIComponent($('Webhook').first().json.body.form_identifier) }}'%20and%20mimeType%3D'application%2Fvnd.google-apps.form'%20and%20trashed%3Dfalse&fields=files(id,name)&spaces=drive",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Webhook').first().json.body.tokens?.google_forms || $('Webhook').first().json.body.access_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "Search Form by Name",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        592,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const identifier = $('Webhook').first().json.body.form_identifier || '';\nconst searchResult = $('Search Form by Name').first().json;\nconst idFromUrl = identifier.match(/[-\\w]{25,}/);\nif (idFromUrl) {\n  return { json: { fileId: idFromUrl[0] } };\n}\nif (searchResult.files && searchResult.files.length > 0) {\n  return { json: { fileId: searchResult.files[0].id, fileName: searchResult.files[0].name } };\n}\nreturn { json: { fileId: null, error: `No Google Form found with the name: \"${identifier}\"` } };"
+      },
+      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "name": "Extract File ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $('Extract File ID').first().json.fileId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Webhook').first().json.body.tokens?.google_forms || $('Webhook').first().json.body.access_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d8f4c630-f83f-4c86-900c-e7fb51e7f353",
+      "name": "Delete Form (Drive API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1008,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $('Webhook').first().json.body.form_identifier.match(/[-\\w]{25,}/) ? $('Webhook').first().json.body.form_identifier.match(/[-\\w]{25,}/)[0] : $('Webhook').first().json.body.form_identifier }}/permissions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Webhook').first().json.body.tokens?.google_forms || $('Webhook').first().json.body.access_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"role\": \"reader\", \"type\": \"anyone\" }",
+        "options": {}
+      },
+      "id": "c6f70778-de75-4164-9d9f-14a2c082a993",
+      "name": "Make Form Public",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        592,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const action = $('Webhook').first().json.body.action || '';\n\nif (action === 'Delete Form') {\n  const fileId = $('Extract File ID').first().json.fileId;\n  const err = $('Extract File ID').first().json.error;\n  if (err || !fileId) {\n    return { json: { message: err || 'Could not find the form to delete.', resultLink: '' } };\n  }\n  return { json: { message: 'Google Form deleted successfully.', resultLink: '' } };\n}\n\nif (action === 'Publish Form') {\n  return { json: { message: 'Google Form published and made public successfully.', resultLink: '' } };\n}\n\n// Default: Create Form\nconst res = $('Create Form Shell').item?.json || $('Create Form Shell').all()[0]?.json;\nconst hasQuestions = (() => { try { const q = $('Inject Questions'); return q && q.all().length > 0; } catch(e) { return false; } })();\nlet msg = 'Form Creation Failed.';\nlet link = '';\nif (res && res.formId) {\n  msg = hasQuestions ? 'Google Form created! AI added requested questions.' : 'Google Form created successfully!';\n  link = res.responderUri;\n}\nreturn { json: { message: msg, resultLink: link } };"
+      },
+      "id": "25282a37-c3f3-4fab-871f-e74fc5f6753a",
+      "name": "Format Callback String",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://backend.affanmohd.online/webhooks/n8n/callback",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-n8n-api-key",
+              "value": "={{ $('Webhook').first().json.headers['x-n8n-api-key'] }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"uid\": $(\"Webhook\").first().json.body.uid, \"automationId\": $(\"Webhook\").first().json.body.automationId, \"executionId\": $(\"Webhook\").first().json.body.executionId, \"status\": \"successful\", \"message\": $json.message, \"resultLink\": $json.resultLink, \"automationName\": \"Google Forms Automation\" } }}",
+        "options": {}
+      },
+      "id": "658dc730-9080-4d0c-924f-eb7a3e5a1b3f",
+      "name": "Callback to WebPilot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1600,
+        800
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Action Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Action Switch": {
+      "main": [
+        [
+          {
+            "node": "Create Form Shell",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Search Form by Name",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Make Form Public",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Form Shell": {
+      "main": [
+        [
+          {
+            "node": "Has Questions?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Questions?": {
+      "main": [
+        [
+          {
+            "node": "Gemini Build Questions",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Callback String",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Build Questions": {
+      "main": [
+        [
+          {
+            "node": "Parse Questions JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Questions JSON": {
+      "main": [
+        [
+          {
+            "node": "Inject Questions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inject Questions": {
+      "main": [
+        [
+          {
+            "node": "Format Callback String",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Form by Name": {
+      "main": [
+        [
+          {
+            "node": "Extract File ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract File ID": {
+      "main": [
+        [
+          {
+            "node": "Delete Form (Drive API)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Form (Drive API)": {
+      "main": [
+        [
+          {
+            "node": "Format Callback String",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Make Form Public": {
+      "main": [
+        [
+          {
+            "node": "Format Callback String",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Callback String": {
+      "main": [
+        [
+          {
+            "node": "Callback to WebPilot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "92e68dbd508648748efd524fb8eb152e025360bb22e30e51b7ed700741996a08"
+  }
+}
