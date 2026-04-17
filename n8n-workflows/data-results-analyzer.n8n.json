@@ -1,5 +1,4 @@
 {
-  "name": "Data Results Analyzer (WebPilot)",
   "nodes": [
     {
       "parameters": {
@@ -8,19 +7,18 @@
         "responseMode": "lastNode",
         "options": {}
       },
-      "id": "wh-dra-001",
+      "id": "8e6ac934-2595-4d18-9744-7197a5c0d92b",
       "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
-        160,
-        600
+        944,
+        -192
       ],
       "webhookId": "data-results-analyzer"
     },
     {
       "parameters": {
-        "method": "GET",
         "url": "=https://www.googleapis.com/drive/v3/files?q=name%3D'{{ encodeURIComponent($('Webhook').first().json.body.file_name) }}'%20and%20trashed%3Dfalse&fields=files(id,name,mimeType)&spaces=drive&pageSize=5",
         "sendHeaders": true,
         "headerParameters": {
@@ -33,26 +31,26 @@
         },
         "options": {}
       },
-      "id": "dra-search-001",
+      "id": "20fbcdff-0406-4e05-ae63-6239af95f2fe",
       "name": "Search File by Name",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
-        380,
-        600
+        1168,
+        -192
       ]
     },
     {
       "parameters": {
         "jsCode": "// Resolve file ID and determine type from search results\nconst searchResult = $('Search File by Name').first().json;\n\nif (!searchResult.files || searchResult.files.length === 0) {\n  return { json: { fileId: null, mimeType: null, error: `No file found in Google Drive with the name: \"${$('Webhook').first().json.body.file_name}\". Make sure the name matches exactly.` } };\n}\n\nconst file = searchResult.files[0];\nconst SHEET_MIME = 'application/vnd.google-apps.spreadsheet';\nconst isSheet = file.mimeType === SHEET_MIME;\n\nreturn { json: { fileId: file.id, fileName: file.name, mimeType: file.mimeType, isSheet } };"
       },
-      "id": "dra-extract-001",
+      "id": "3db5cb9c-b972-464b-bcdf-8e0ab1ad9bc0",
       "name": "Extract File Info",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        600,
-        600
+        1392,
+        -192
       ]
     },
     {
@@ -66,18 +64,17 @@
           ]
         }
       },
-      "id": "dra-if-sheet",
+      "id": "e2efd897-0243-48ab-978f-916f8c435685",
       "name": "Is Google Sheet?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
       "position": [
-        820,
-        600
+        1616,
+        -192
       ]
     },
     {
       "parameters": {
-        "method": "GET",
         "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $('Extract File Info').first().json.fileId }}/values/A1:ZZ1000",
         "sendHeaders": true,
         "headerParameters": {
@@ -90,18 +87,17 @@
         },
         "options": {}
       },
-      "id": "dra-fetch-sheet",
+      "id": "17b12233-7ef2-428b-a644-379401e78935",
       "name": "Fetch Sheet Data",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
-        1040,
-        480
+        1824,
+        -304
       ]
     },
     {
       "parameters": {
-        "method": "GET",
         "url": "=https://www.googleapis.com/drive/v3/files/{{ $('Extract File Info').first().json.fileId }}/export?mimeType=text%2Fcsv",
         "sendHeaders": true,
         "headerParameters": {
@@ -114,26 +110,26 @@
         },
         "options": {}
       },
-      "id": "dra-export-csv",
+      "id": "f4bb6221-c0a8-4a4c-bc51-aaf3100a39d4",
       "name": "Export as CSV",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
-        1040,
-        720
+        1824,
+        -64
       ]
     },
     {
       "parameters": {
         "jsCode": "// Unified data parser: handles both Google Sheets API response and raw CSV text\n// Outputs: { headers[], rows[][], csvSample(string), rowCount }\n\nlet headers = [];\nlet rows = [];\n\n// Try Sheets API format first (from Fetch Sheet Data)\ntry {\n  const sheetData = $('Fetch Sheet Data').first().json;\n  if (sheetData.values && sheetData.values.length > 0) {\n    headers = sheetData.values[0];\n    rows = sheetData.values.slice(1);\n  }\n} catch(e) { /* Sheets node didn't run */ }\n\n// If no Sheets data, try CSV export (from Export as CSV)\nif (headers.length === 0) {\n  try {\n    const csvText = $('Export as CSV').first().json.data ||\n                    $('Export as CSV').first().binary?.data?.toString() ||\n                    String($('Export as CSV').first().json);\n    const lines = csvText.trim().split('\\n').filter(l => l.trim());\n    if (lines.length > 0) {\n      const parseCsv = (line) => {\n        const result = [];\n        let current = '';\n        let inQuotes = false;\n        for (let i = 0; i < line.length; i++) {\n          const ch = line[i];\n          if (ch === '\"') { inQuotes = !inQuotes; }\n          else if (ch === ',' && !inQuotes) { result.push(current.trim()); current = ''; }\n          else { current += ch; }\n        }\n        result.push(current.trim());\n        return result;\n      };\n      headers = parseCsv(lines[0]);\n      rows = lines.slice(1).map(parseCsv);\n    }\n  } catch(e) { /* CSV also failed */ }\n}\n\nif (headers.length === 0) {\n  return { json: { error: 'Could not parse file data. Make sure the file is a Google Sheet, CSV, or Excel file with data in it.' } };\n}\n\n// Build markdown table (first 50 rows max to keep it readable)\nconst displayRows = rows.slice(0, 50);\nlet mdTable = '| ' + headers.join(' | ') + ' |\\n';\nmdTable += '|' + headers.map(() => '---').join('|') + '|\\n';\ndisplayRows.forEach(row => {\n  const padded = headers.map((_, i) => String(row[i] ?? '').replace(/\\|/g, '/').replace(/\\n/g, ' '));\n  mdTable += '| ' + padded.join(' | ') + ' |\\n';\n});\n\n// Build CSV sample (max 8000 chars) for Gemini\nconst csvLines = [headers.join(',')];\nrows.slice(0, 200).forEach(row => {\n  csvLines.push(headers.map((_, i) => `\"${String(row[i] ?? '').replace(/\"/g, '\"\"')}\"`).join(','));\n});\nconst csvSample = csvLines.join('\\n').substring(0, 8000);\n\nreturn { json: { headers, rowCount: rows.length, mdTable, csvSample } };"
       },
-      "id": "dra-parse-data",
+      "id": "be4d064a-53a1-40c2-b3ad-aac9da1f4c0a",
       "name": "Parse & Map Data",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1280,
-        600
+        2064,
+        -192
       ]
     },
     {
@@ -147,19 +143,19 @@
           ]
         }
       },
-      "id": "dra-if-viz",
+      "id": "ba4c73e8-0fa1-427c-a94e-863ed3bf81ec",
       "name": "Visualization Requested?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
       "position": [
-        1500,
-        600
+        2288,
+        -192
       ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=AIzaSyCDrR9BnL-QfZtP43b0dwRRTROFZjeSq4c",
+        "url": "=https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key={{ $('Webhook').first().json.body.gemini_api_key }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -171,29 +167,29 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ ({\n  contents: [{\n    parts: [{\n      text: `You are a data analyst. Analyze the CSV data below based on the user's request and return a JSON response.\\n\\nUser Request: \"${$('Webhook').first().json.body.analysis_prompt}\"\\n\\nCSV Data (${$('Parse & Map Data').first().json.rowCount} rows):\\n${$('Parse & Map Data').first().json.csvSample}\\n\\nReturn ONLY a valid JSON object with this structure:\\n{\\n  \"insights\": \"A concise markdown analysis (2-4 paragraphs). Use **bold** for key findings.\",\\n  \"charts\": [\\n    {\\n      \"type\": \"bar\",\\n      \"title\": \"Chart title\",\\n      \"labels\": [\"Label1\", \"Label2\"],\\n      \"datasets\": [{\\n        \"label\": \"Series name\",\\n        \"data\": [10, 20]\\n      }]\\n    }\\n  ]\\n}\\n\\nRules:\\n- Max 3 charts. Only generate charts if the data clearly supports them.\\n- Chart types allowed: bar, pie, line\\n- Keep insights under 300 words\\n- Do NOT wrap in markdown code blocks`\n    }]\n  }],\n  generationConfig: {\n    responseMimeType: \"application/json\",\n    maxOutputTokens: 4096,\n    temperature: 0.3\n  }\n}) }}",
+        "jsonBody": "={{ JSON.stringify({\n  contents: [{\n    parts: [{\n      text: `You are a data analyst. Analyze the CSV data below based on the user's request and return a JSON response.\\n\\nUser Request: \"${$('Webhook').first().json.body.analysis_prompt}\"\\n\\nCSV Data (${$('Parse & Map Data').first().json.rowCount} rows):\\n${$('Parse & Map Data').first().json.csvSample}\\n\\nReturn ONLY a valid JSON object with this structure:\\n{\\n  \"insights\": \"A concise markdown analysis (2-4 paragraphs). Use **bold** for key findings.\",\\n  \"charts\": [\\n    {\\n      \"type\": \"bar\",\\n      \"title\": \"Chart title\",\\n      \"labels\": [\"Label1\", \"Label2\"],\\n      \"datasets\": [{\\n        \"label\": \"Series name\",\\n        \"data\": [10, 20]\\n      }]\\n    }\\n  ]\\n}\\n\\nRules:\\n- You MUST generate between 4 to 5 charts.\\n- Ensure visual variety: Use a mix of different chart types (bar, pie, line) across your charts. Do not generate charts of only one type.\\n- Keep insights under 500 words\\n- Do NOT wrap in markdown code blocks`\n    }]\n  }],\n  generationConfig: {\n    responseMimeType: \"application/json\",\n    maxOutputTokens: 4096,\n    temperature: 0.3\n  }\n}) }}",
         "options": {}
       },
-      "id": "dra-gemini-analyze",
+      "id": "2c6f91fa-2af5-4006-96ff-37e644c323e6",
       "name": "Gemini Analyze",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
-        1720,
-        480
+        2512,
+        -304
       ]
     },
     {
       "parameters": {
-        "jsCode": "const parseData = $('Parse & Map Data').first().json;\n\n// Parse errors\nif (parseData.error) {\n  return { json: { message: parseData.error, resultLink: '', chartData: null } };\n}\n\nconst fileName = $('Extract File Info').first().json.fileName || $('Webhook').first().json.body.file_name;\nconst rowCount = parseData.rowCount;\nconst wantViz = $('Webhook').first().json.body.include_visualization;\nconst headers = parseData.headers || [];\n\n// Short summary shown in the execution log card \u2014 no table, no big text\nconst shortMessage = `\u2705 Analysis complete for **${fileName}**\\n**${rowCount} rows** across ${headers.length} columns analyzed.${wantViz === true || wantViz === 'true' ? '\\n\\nClick **Analyze Results** to view AI insights and interactive charts.' : ''}`;\n\nlet chartData = null;\n\nif (wantViz === true || wantViz === 'true') {\n  try {\n    const geminiRaw = $('Gemini Analyze').first().json.candidates[0].content.parts[0].text;\n    const cleanedText = geminiRaw.replace(/```json/g, '').replace(/```/g, '').trim();\n    const geminiResult = JSON.parse(cleanedText);\n    // Pack both insights text AND charts together into chartData\n    chartData = JSON.stringify({\n      insightsText: geminiResult.insights || '',\n      charts: geminiResult.charts || []\n    });\n  } catch(e) {\n    chartData = JSON.stringify({ insightsText: 'AI analysis could not be generated for this dataset.', charts: [] });\n  }\n}\n\nreturn { json: { message: shortMessage, resultLink: '', chartData } };"
+        "jsCode": "const parseData = $('Parse & Map Data').first().json;\n\n// Parse errors\nif (parseData.error) {\n  return { json: { message: parseData.error, resultLink: '', chartData: null } };\n}\n\nconst fileName = $('Extract File Info').first().json.fileName || $('Webhook').first().json.body.file_name;\nconst rowCount = parseData.rowCount;\nconst wantViz = $('Webhook').first().json.body.include_visualization;\nconst headers = parseData.headers || [];\n\n// Short summary shown in the execution log card — no table, no big text\nconst shortMessage = `✅ Analysis complete for **${fileName}**\\n**${rowCount} rows** across ${headers.length} columns analyzed.${wantViz === true || wantViz === 'true' ? '\\n\\nClick **Analyze Results** to view AI insights and interactive charts.' : ''}`;\n\nlet chartData = null;\n\nif (wantViz === true || wantViz === 'true') {\n  try {\n    const geminiRaw = $('Gemini Analyze').first().json.candidates[0].content.parts[0].text;\n    const cleanedText = geminiRaw.replace(/```json/g, '').replace(/```/g, '').trim();\n    const geminiResult = JSON.parse(cleanedText);\n    // Pack both insights text AND charts together into chartData\n    chartData = JSON.stringify({\n      insightsText: geminiResult.insights || '',\n      charts: geminiResult.charts || []\n    });\n  } catch(e) {\n    chartData = JSON.stringify({ insightsText: 'AI analysis could not be generated for this dataset.', charts: [] });\n  }\n}\n\nreturn { json: { message: shortMessage, resultLink: '', chartData } };"
       },
-      "id": "dra-format-callback",
+      "id": "75d341ed-2977-4fd5-b8c7-f6b5e94b3c3e",
       "name": "Format Callback",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1960,
-        600
+        2752,
+        -192
       ]
     },
     {
@@ -209,7 +205,7 @@
             },
             {
               "name": "x-n8n-api-key",
-              "value": "={{ $('Webhook').first().json.headers['x-n8n-api-key'] }}"
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwZWY4MjZlOS0wNjg2LTQyZTYtYWI5Ny1jMmZhYjMzZDY4ZGMiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzY5NDk4MTMxfQ.3frCQXyY4qJDWGxoFdERmeC94Cj74b3IURRLqm9NF0U"
             }
           ]
         },
@@ -218,13 +214,13 @@
         "jsonBody": "={{ { \"uid\": $('Webhook').first().json.body.uid, \"automationId\": $('Webhook').first().json.body.automationId, \"executionId\": $('Webhook').first().json.body.executionId, \"status\": \"successful\", \"message\": $json.message, \"resultLink\": $json.resultLink, \"chartData\": $json.chartData, \"automationName\": \"Data Results Analyzer\" } }}",
         "options": {}
       },
-      "id": "dra-callback-001",
+      "id": "4c152f09-ac44-4306-a42f-f82db3de7072",
       "name": "Callback to WebPilot",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
-        2180,
-        600
+        2976,
+        -192
       ]
     }
   ],

@@ -374,9 +374,38 @@ router.post('/chat', authMiddleware, async (req, res) => {
 
         const primaryToken = requiredAccounts.length > 0 ? tokensMap[requiredAccounts[0]] : null;
 
+        // --- ENFORCE SCHEMA DEFAULTS & FUZZY BOOLEAN COERCION ---
+        const userParams = classification.parameters || {};
+        if (match.inputs && Array.isArray(match.inputs)) {
+            match.inputs.forEach(inp => {
+                const paramKey = inp.id;
+                let val = userParams[paramKey];
+                
+                // Fuzzy matching if the AI mapped it to something like 'generate_charts' instead of 'include_visualization'
+                if (val === undefined && paramKey === "include_visualization" && userParams["generate_charts"] !== undefined) {
+                    val = userParams["generate_charts"];
+                }
+
+                if (inp.type === 'toggle') {
+                    // Fuzzy coercion: if the AI passed 'yes', 'on', 'true', or true, make it strict true. Otherwise strict false, or fallback to default.
+                    if (val !== undefined) {
+                        const strVal = String(val).toLowerCase().trim();
+                        userParams[paramKey] = (strVal === 'true' || strVal === 'yes' || strVal === 'on' || strVal === '1');
+                    } else if (inp.defaultValue !== undefined) {
+                        userParams[paramKey] = inp.defaultValue;
+                    }
+                } else {
+                    // For strings, just fallback to defaultValue if strictly undefined
+                    if (val === undefined && inp.defaultValue !== undefined) {
+                        userParams[paramKey] = inp.defaultValue;
+                    }
+                }
+            });
+        }
+
         const payload = {
             // User-provided parameters from the AI (post_topic, post_tone, etc.)
-            ...(classification.parameters || {}),
+            ...userParams,
 
             // Nested tokens map — N8N "Single Topic Setup" reads body.tokens?.linkedin
             tokens: tokensMap,
