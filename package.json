@@ -1,0 +1,20 @@
+{
+  "name": "webpilot-backend",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "@google/genai": "^1.47.0",
+    "axios": "^1.13.3",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "firebase": "^12.7.0",
+    "firebase-admin": "^13.6.0",
+    "node-cron": "^4.2.1",
+    "nodemon": "^3.1.14",
+    "reactflow": "^11.11.4"
+  }
+}

@@ -23,11 +23,19 @@ router.post("/n8n/callback", async (req, res) => {
         }
 
         // 3. Save Execution Log to Firestore
+        // Normalize N8N status strings → exactly "Success" or "Failed"
+        // N8N may send: "Successful", "success", "completed", "failed", etc.
+        const rawStatus = (status || "completed").toLowerCase();
+        const normalizedStatus = rawStatus.includes("fail") || rawStatus.includes("error")
+            ? "Failed"
+            : "Success";
+
         const logData = {
-            status: status || "completed", // e.g., 'Successful', 'Failed'
-            resultLink: resultLink || null, // e.g., the YouTube video URL
-            message: message || "Automation finished",
-            timestamp: admin.firestore.FieldValue.serverTimestamp() // Updated timestamp
+            status: normalizedStatus,
+            resultUrl: resultLink || null,
+            resultLink: resultLink || null,
+            message: message || "Automation finished successfully",
+            timestamp: admin.firestore.FieldValue.serverTimestamp()
         };
 
         const logsCollection = db
@@ -99,7 +107,7 @@ router.post("/n8n/callback", async (req, res) => {
                         
                         console.log(`[Webhooks] Advanced to step ${nextStepId} for execution ${executionId}`);
                         
-                        if (automationId && automationId !== "draft") {
+                        if (automationId && automationId !== "draft" && automationId !== "ai-generated") {
                             await db.collection("users").doc(uid).collection("automations").doc(automationId).update({
                                 lastRun: admin.firestore.FieldValue.serverTimestamp(),
                                 lastRunStatus: `Running Step ${nextStepId}`
@@ -129,15 +137,17 @@ router.post("/n8n/callback", async (req, res) => {
         }
 
         // Optional: Update the lastRun timestamp on the automation itself
-        await db
-            .collection("users")
-            .doc(uid)
-            .collection("automations")
-            .doc(automationId)
-            .update({
-                lastRun: admin.firestore.FieldValue.serverTimestamp(),
-                lastRunStatus: logData.status
-            });
+        if (automationId && automationId !== "draft" && automationId !== "ai-generated") {
+            await db
+                .collection("users")
+                .doc(uid)
+                .collection("automations")
+                .doc(automationId)
+                .update({
+                    lastRun: admin.firestore.FieldValue.serverTimestamp(),
+                    lastRunStatus: logData.status
+                });
+        }
 
         console.log(`[Webhooks] Successfully logged execution for automation ${automationId} (User: ${uid})`);
         res.status(200).json({ success: true, message: "Log saved successfully" });

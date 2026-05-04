@@ -14,6 +14,10 @@ const activeSchedules = new Map();
 function initScheduler() {
     console.log("[Scheduler] Initializing global schedule listener...");
     try {
+        if (!db) {
+            console.warn("[Scheduler] Skipping initialization: db is null (Firebase not initialized)");
+            return;
+        }
         db.collectionGroup("automations").onSnapshot(snapshot => {
             snapshot.docChanges().forEach(change => {
                 const autoDoc = change.doc;

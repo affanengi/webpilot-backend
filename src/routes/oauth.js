@@ -96,9 +96,7 @@ router.get("/:provider/callback", async (req, res) => {
 });
 
 // DELETE /auth/:provider
-// Disconnect logic: Remove connection AND dependent automations
-// DELETE /auth/:provider
-// Disconnect logic: Remove connection AND dependent automations
+// Disconnect logic: Disable dependent automations (do NOT delete them) and remove the token doc
 router.delete("/:provider", authMiddleware, async (req, res) => {
     const { provider } = req.params;
     const { uid } = req.user;
@@ -108,36 +106,51 @@ router.delete("/:provider", authMiddleware, async (req, res) => {
     }
 
     try {
+        const automationsRef = db.collection("users").doc(uid).collection("automations");
+
+        // Query 1: automations where connected_account_type matches
+        const byTypeSnapshot = await automationsRef
+            .where("connected_account_type", "==", provider)
+            .get();
+
+        // Query 2: automations where connected_accounts array contains the provider
+        const byArraySnapshot = await automationsRef
+            .where("connected_accounts", "array-contains", provider)
+            .get();
+
+        // Merge unique automation docs (deduplicate by id)
+        const seenIds = new Set();
+        const docsToDisable = [];
+
+        [...byTypeSnapshot.docs, ...byArraySnapshot.docs].forEach((docSnap) => {
+            if (!seenIds.has(docSnap.id)) {
+                seenIds.add(docSnap.id);
+                docsToDisable.push(docSnap);
+            }
+        });
+
+        // Batch: disable automations (not delete) + remove connection token
         const batch = db.batch();
 
-        // 1. Query dependent automations
-        // Ensure the field name matches exactly what is stored in automations.js (connected_account_type)
-        const automationsRef = db.collection("users").doc(uid).collection("automations");
-        const automationsSnapshot = await automationsRef.where("connected_account_type", "==", provider).get();
-
-        // 2. Queue automation deletes
-        if (!automationsSnapshot.empty) {
-            automationsSnapshot.docs.forEach((doc) => {
-                batch.delete(doc.ref);
+        docsToDisable.forEach((docSnap) => {
+            batch.update(docSnap.ref, {
+                status: "disconnected",
+                disconnectedProvider: provider,
+                disconnectedAt: new Date().toISOString()
             });
-            console.log(`[Disconnect] Queued deletion for ${automationsSnapshot.size} automations for user ${uid}.`);
-        } else {
-            console.log(`[Disconnect] No dependent automations found for user ${uid} and provider ${provider}.`);
-        }
+        });
 
-        // 3. Queue connection delete
+        // Remove the connected account token doc
         const connectionRef = db.collection("users").doc(uid).collection("connected_accounts").doc(provider);
         batch.delete(connectionRef);
 
-        // 4. Commit atomic batch
-        // Even if automationsSnapshot is empty, the batch will successfully delete the connectionRef
         await batch.commit();
 
-        console.log(`[Disconnect] User ${uid} disconnected ${provider} successfully.`);
+        console.log(`[Disconnect] User ${uid} disconnected ${provider}. Disabled ${docsToDisable.length} automation(s).`);
 
         res.json({
             success: true,
-            message: `Disconnected ${provider}. Deleted ${automationsSnapshot.size} related automations.`
+            message: `Disconnected ${provider}. ${docsToDisable.length} workflow(s) have been disabled. Reconnect ${provider} and re-save them to re-enable.`
         });
 
     } catch (error) {
